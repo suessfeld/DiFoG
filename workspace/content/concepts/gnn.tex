@@ -1,0 +1,89 @@
+\subsection{GNN}
+
+\subsubsection{Anisotropic GNNs}
+The difusco paper \cite{sun-23-difusco} relies on anisotropic GNNs. Those were initially introduced by \cite{bresson-18-nn-for-variable-graphs}. Instead of treating all neighbors equally, anisotropic GNNs allow to differentiate between neighbors - thus replacing summing, with different operators and using gates. LSTMs apparently proved to be too complex for the task. 
+The proposed model is described as $$h_i^{\ell+1} = f_{\text{G-GCNN}}^{\ell} \left( h_i^{\ell} , \{h_j^{\ell} : j \to i\} \right) = \text{ReLU} \left( U^{\ell} h_i^{\ell} + \sum_{j \to i} \eta_{ij} \odot V^{\ell} h_j^{\ell} \right)$$
+Meaning:
+\begin{itemize}
+    \item $h_{i}^{l+1}$: Node feature vector of node $i$ at layer $l+1$ (so defining the next step)
+    \item $U^{l}h_{i}^{l}$: Multiply each node by the same matrix $U^{l}$ (learnable parameters)
+    \item $\sum_{j\rightarrow i}$: Just aggregation over all neighbors of node $i$
+    \item $V^{l}h_{j}^{l}$: Also a weight matrix, but it is multiplied with the neighbor features
+    \item $\eta_{ij}$: The gate, which is computed as $\eta_{ij} = \sigma \left( A^{l} h_i^{l} + B^{l} h_j^{l} \right)$, with $A^{l}, B^{l}$ being learnable parameters again and $\sigma$ the sigmoid function. Note: \begin{itemize}
+        \item A transforms the central node vector into a scalar value
+        \item B does the same for the neighbor node. 
+        \item Thus those two matrices decide how important the neighbor is for the central node.
+    \end{itemize}
+\end{itemize}
+
+\question{Can other GNNs be used here? What do other papers say about the use of this GNN? What are the specific benefits of this architecture?}
+
+\textbf{Example (one pass):}
+
+\begin{align*}
+U &= \begin{bmatrix} 1 & 2 & 1 \\ 0 & 1 & 1 \\ 2 & 1 & 1 \end{bmatrix}, \quad
+V = \begin{bmatrix} 0 & 0 & 1 \\ 1 & 2 & 1 \\ 0 & 1 & 1 \end{bmatrix} \\
+A &= \begin{bmatrix} 1 & 0.5 & 1 \\ 2 & 2 & 1 \\ 1 & 1 & 1 \end{bmatrix}, \quad
+B = \begin{bmatrix} 1 & 0 & 0 \\ 0 & 1 & 0 \\ 0 & 0 & 1 \end{bmatrix} \\
+h_1 &= \begin{bmatrix} 1 \\ 0 \\ 0 \end{bmatrix}, \quad
+h_2 = \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix}, \quad
+h_3 = \begin{bmatrix} 0 \\ 0 \\ 1 \end{bmatrix}, \quad
+h_4 = \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix} \\
+\sigma(x) &= \frac{1}{1 + e^{-x}}
+\end{align*}
+
+\begin{align*}
+Uh_1 &= \begin{bmatrix} 1 \\ 0 \\ 2 \end{bmatrix}, \quad
+Uh_2 = \begin{bmatrix} 2 \\ 1 \\ 1 \end{bmatrix}, \quad
+Uh_3 = \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix}, \quad
+Uh_4 = \begin{bmatrix} 4 \\ 2 \\ 4 \end{bmatrix} \\
+Vh_1 &= \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix}, \quad
+Vh_2 = \begin{bmatrix} 0 \\ 2 \\ 1 \end{bmatrix}, \quad
+Vh_3 = \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix}, \quad
+Vh_4 = \begin{bmatrix} 1 \\ 4 \\ 2 \end{bmatrix} \\
+Ah_1 &= \begin{bmatrix} 1 \\ 2 \\ 1 \end{bmatrix}, \quad
+Ah_2 = \begin{bmatrix} 0.5 \\ 2 \\ 1 \end{bmatrix}, \quad
+Ah_3 = \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix}, \quad
+Ah_4 = \begin{bmatrix} 2.5 \\ 5 \\ 3 \end{bmatrix} \\
+Bh_1 &= \begin{bmatrix} 1 \\ 0 \\ 0 \end{bmatrix}, \quad
+Bh_2 = \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix}, \quad
+Bh_3 = \begin{bmatrix} 0 \\ 0 \\ 1 \end{bmatrix}, \quad
+Bh_4 = \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix}
+\end{align*}
+
+\begin{align*}
+h_1^{\text{new}} &= \text{ReLU}\left( Uh_1 + \left[ \sigma(Ah_1 + Bh_2) \odot Vh_2 \right] \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 1 \\ 0 \\ 2 \end{bmatrix} + \left[ \sigma\left(\begin{bmatrix} 1 \\ 2 \\ 1 \end{bmatrix} + \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix}\right) \odot \begin{bmatrix} 0 \\ 2 \\ 1 \end{bmatrix} \right] \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 1 \\ 0 \\ 2 \end{bmatrix} + \left[ \begin{bmatrix} 0.731 \\ 0.953 \\ 0.731 \end{bmatrix} \odot \begin{bmatrix} 0 \\ 2 \\ 1 \end{bmatrix} \right] \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 1 \\ 0 \\ 2 \end{bmatrix} + \begin{bmatrix} 0 \\ 1.905 \\ 0.731 \end{bmatrix} \right) \\
+&= \begin{bmatrix} 1.000 \\ 1.905 \\ 2.731 \end{bmatrix}
+\end{align*}
+
+\begin{align*}
+h_2^{\text{new}} &= \text{ReLU}\left( Uh_2 + \sigma(Ah_2 + Bh_1)\odot Vh_1 + \sigma(Ah_2 + Bh_3)\odot Vh_3 + \sigma(Ah_2 + Bh_4)\odot Vh_4 \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 2 \\ 1 \\ 1 \end{bmatrix} + \left[ \sigma\left(\begin{bmatrix} 1.5 \\ 2 \\ 1 \end{bmatrix}\right) \odot \begin{bmatrix} 0 \\ 1 \\ 0 \end{bmatrix} \right] + \left[ \sigma\left(\begin{bmatrix} 0.5 \\ 2 \\ 2 \end{bmatrix}\right) \odot \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix} \right] + \left[ \sigma\left(\begin{bmatrix} 1.5 \\ 3 \\ 2 \end{bmatrix}\right) \odot \begin{bmatrix} 1 \\ 4 \\ 2 \end{bmatrix} \right] \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 2 \\ 1 \\ 1 \end{bmatrix} + \begin{bmatrix} 0 \\ 0.881 \\ 0 \end{bmatrix} + \begin{bmatrix} 0.622 \\ 0.881 \\ 0.881 \end{bmatrix} + \begin{bmatrix} 0.818 \\ 3.810 \\ 1.762 \end{bmatrix} \right) \\
+&= \begin{bmatrix} 3.440 \\ 6.572 \\ 3.643 \end{bmatrix}
+\end{align*}
+
+\begin{align*}
+h_3^{\text{new}} &= \text{ReLU}\left( Uh_3 + \sigma(Ah_3 + Bh_2)\odot Vh_2 + \sigma(Ah_3 + Bh_4)\odot Vh_4 \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix} + \left[ \sigma\left(\begin{bmatrix} 1 \\ 2 \\ 1 \end{bmatrix}\right) \odot \begin{bmatrix} 0 \\ 2 \\ 1 \end{bmatrix} \right] + \left[ \sigma\left(\begin{bmatrix} 2 \\ 2 \\ 2 \end{bmatrix}\right) \odot \begin{bmatrix} 1 \\ 4 \\ 2 \end{bmatrix} \right] \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix} + \begin{bmatrix} 0 \\ 1.762 \\ 0.731 \end{bmatrix} + \begin{bmatrix} 0.881 \\ 3.523 \\ 1.762 \end{bmatrix} \right) \\
+&= \begin{bmatrix} 1.881 \\ 6.285 \\ 3.493 \end{bmatrix}
+\end{align*}
+
+\begin{align*}
+h_4^{\text{new}} &= \text{ReLU}\left( Uh_4 + \sigma(Ah_4 + Bh_2)\odot Vh_2 + \sigma(Ah_4 + Bh_3)\odot Vh_3 \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 4 \\ 2 \\ 4 \end{bmatrix} + \left[ \sigma\left(\begin{bmatrix} 2.5 \\ 6 \\ 3 \end{bmatrix}\right) \odot \begin{bmatrix} 0 \\ 2 \\ 1 \end{bmatrix} \right] + \left[ \sigma\left(\begin{bmatrix} 2.5 \\ 5 \\ 4 \end{bmatrix}\right) \odot \begin{bmatrix} 1 \\ 1 \\ 1 \end{bmatrix} \right] \right) \\
+&= \text{ReLU}\left( \begin{bmatrix} 4 \\ 2 \\ 4 \end{bmatrix} + \begin{bmatrix} 0 \\ 1.995 \\ 0.953 \end{bmatrix} + \begin{bmatrix} 0.924 \\ 0.993 \\ 0.982 \end{bmatrix} \right) \\
+&= \begin{bmatrix} 4.924 \\ 4.988 \\ 5.935 \end{bmatrix}
+\end{align*}
+
+\[
+H_{\text{new}} = \begin{bmatrix}
+1.000 & 3.440 & 1.881 & 4.924 \\
+1.905 & 6.572 & 6.285 & 4.988 \\
+2.731 & 3.643 & 3.493 & 5.935
+\end{bmatrix}
+\]

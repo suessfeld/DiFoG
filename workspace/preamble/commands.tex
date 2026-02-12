@@ -1,0 +1,53 @@
+\newcommand{\comment}[1]{\par
+  \begin{mdframed}[
+    linewidth=0.5pt,
+    linecolor=ForestGreen!70!black,
+    topline=false,
+    rightline=false,
+    bottomline=false,
+    leftmargin=1.5em,
+    rightmargin=1.5em,
+    skipabove=0.5pt,
+    skipbelow=0.5pt,]
+    \textit{\textcolor{ForestGreen!70!black}{#1}}
+  \end{mdframed}
+}
+
+\newcommand{\todo}[1]{\par
+  \begin{mdframed}[
+    linewidth=0.5pt, 
+    linecolor=red!70!black, 
+    topline=false, 
+    rightline=false, 
+    bottomline=false, 
+    leftmargin=1.5em, 
+    rightmargin=1.5em,
+    skipabove=0.5pt,
+    skipbelow=0.5pt,
+    singleextra={
+      \path (O) -- (P-|O) node[midway, anchor=south, rotate=90, text=red!70!black, font=\sffamily\scriptsize, inner ysep=4pt] {TODO};
+    }
+  ]
+    \textit{\textcolor{red!70!black}{#1}}
+  \end{mdframed}
+}
+
+\newcommand{\question}[1]{\par
+  \begin{mdframed}[
+    linewidth=0.5pt, 
+    linecolor=blue!70!black, 
+    topline=false, 
+    rightline=false, 
+    bottomline=false, 
+    leftmargin=1.5em, 
+    rightmargin=1.5em,
+    skipabove=0.5pt,
+    skipbelow=0.5pt,
+    singleextra={
+      \path (O) -- (P-|O) node[midway, anchor=east, text=blue!70!black, font=\sffamily\large, inner xsep=4pt] {?};
+    }
+  ]
+    \textit{\textcolor{blue!70!black}{#1}}
+  \end{mdframed}
+}
+
