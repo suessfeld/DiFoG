@@ -1,5 +1,3 @@
-include("../../utils/data_utils.jl")
-
 using SimpleGraphs
 using SimpleGraphAlgorithms
 using ChooseOptimizer
