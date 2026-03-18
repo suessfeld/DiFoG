@@ -27,3 +27,5 @@ Manifest*.toml
 LocalPreferences.toml
 JuliaLocalPreferences.toml
 workspace/indent.log
+
+src/tests/instances/
