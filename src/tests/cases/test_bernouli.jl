@@ -6,7 +6,7 @@ using Thesis
     using Thesis
     using .BernoulliTestSetup.TestUtils: load_collection, split_dataset, train_diffusion_model!, run_inference_and_save
     
-    instance_collection="misp_medium_instances"
+    instance_collection="misp_small_instances"
     epochs = 5
     learning_rate = 1e-3
 
