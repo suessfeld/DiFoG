@@ -1,18 +1,19 @@
+# src/tests/cases/test_bernoulli_CUDA.jl
 using TestItems
 using Thesis
 
-@testitem "Train Gaussian Diffusion on MISP" setup=[BernoulliTestSetupCUDA] begin
+@testitem "Train Gaussian Diffusion on MISP" setup=[BernoulliTestSetupDIFUSCO] begin
     using Profile
     using CUDA
-    using LuxCUDA #TODO Remove?
     using Flux
     using Thesis
-    using Profile
-    using .BernoulliTestSetupCUDA.TestUtils: load_collection, split_dataset, train_diffusion_model!, run_inference_and_save
+    using GraphNeuralNetworks
+    using .BernoulliTestSetupDIFUSCO.TestUtils: load_collection, split_dataset, train_diffusion_model!, run_inference_and_save
     
-    instance_collection="misp_medium_instances"
+    instance_collection="difusco_instances"
     epochs = 5
     learning_rate = 1e-3
+    batch_size = 64 # Configure your batch size to fit your VRAM
 
     time_dim = 32
     feature_dim = 1
@@ -40,24 +41,28 @@ using Thesis
 
         optim = Flux.setup(Flux.Adam(learning_rate), model) 
         
-        # 2. Move your datasets to the GPU
-        training_pairs_gpu = [(g |> Flux.gpu, name) for (g, name) in training_pairs]
-        test_pairs_gpu = [(g |> Flux.gpu, name) for (g, name) in test_pairs]
+        # 1. Create a DataLoader for lazy batching on the CPU
+        # By passing a vector of tuples (GNNGraph, String), MLUtils/Flux automatically
+        # batches the graphs into disjoint graphs and collates the strings.
+        train_loader = Flux.DataLoader(training_pairs, batchsize=batch_size, shuffle=true)
         
         @info "Starting Training..."
-        loss_history = train_diffusion_model!(model, optim, training_pairs_gpu, epochs=epochs)
+        # 2. Pass the DataLoader instead of the full array
+        loss_history = train_diffusion_model!(model, optim, train_loader, epochs=epochs)
         
         @test loss_history[end] < loss_history[1]
         
         @info "Running Inference and saving results..." 
-        run_inference_and_save(model, test_pairs_gpu, inferences_dir)
+        # 3. Pass CPU test pairs (just-in-time GPU transfer happens inside)
+        run_inference_and_save(model, test_pairs, inferences_dir)
         @info "Inferences successfully saved to: $inferences_dir"
     end
 end
 
-@testmodule BernoulliTestSetup begin
+@testmodule BernoulliTestSetupDIFUSCO begin
     using DotEnv
     using Thesis
+    using CUDA
     using Flux
     using GraphNeuralNetworks
     using Statistics

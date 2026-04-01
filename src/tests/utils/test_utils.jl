@@ -8,7 +8,7 @@ using Printf
 using Thesis
 using ..InstanceUtils: load_instance
 
-export load_collection, split_dataset, train_diffusion_model!, run_inference_and_save
+export load_collection, split_dataset, run_inference_and_save
 
 """
     load_collection(instance_collection::String)
@@ -72,49 +72,32 @@ function split_dataset(all_pairs::Vector{Tuple{GNNGraph, String}}, train_ratio::
 end
 
 """
-    train_diffusion_model!(model, optim, training_pairs; epochs=5)
-
-Standard training loop for diffusion models, optimizing the MSE loss for predicted noise.
-"""
-function train_diffusion_model!(model::DiffusionModel, optim, training_pairs; epochs::Int=5)
-    loss_history = Float32[]
-    for epoch in 1:epochs
-        epoch_loss = 0.0f0
-        shuffled_data = training_pairs[randperm(length(training_pairs))]
-        
-        for (g, _) in shuffled_data
-            x_start = g.ndata.x 
-            val, grads = Flux.withgradient(model) do m
-                Thesis.compute_loss(m.method, m, x_start, g)
-            end
-            Flux.update!(optim, model, grads[1])
-            epoch_loss += val
-        end
-        
-        avg_loss = epoch_loss / length(training_pairs)
-        push!(loss_history, avg_loss)
-        @info "Epoch $epoch | Avg Loss: $avg_loss"
-    end
-    return loss_history
-end
-
-"""
     run_inference_and_save(model, test_pairs, inferences_dir)
 
-Generates heatmaps for the test set and writes the outputs to the inferences directory.
+Extracts all test graphs, passes them to `infer` at once, and handles 
+the formatting and file saving for the resulting heatmaps.
 """
 function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_dir)
-    for (g, filename) in test_pairs
-        num_nodes = g.num_nodes
-        shape = (1, num_nodes)
+    # Extract just the graphs for the infer function
+    graphs = [pair[1] for pair in test_pairs]
+    filenames = [pair[2] for pair in test_pairs]
+    
+    inference_time = @elapsed begin
+        # Call infer with all instances at once
+        heatmaps_cpu = Thesis.infer(model, graphs)
+    end
+    
+    @info "Inference for $(length(test_pairs)) graphs took $(round(inference_time, digits=4)) seconds."
+    
+    # Save the output for each instance
+    for i in 1:length(test_pairs)
+        g_cpu = graphs[i]
+        filename = filenames[i]
+        heatmap_cpu = heatmaps_cpu[i]
         
-        inference_time = @elapsed begin
-            heatmap = Thesis.sample_heatmap(model.process, model, shape, g)
-        end
-        
-        @info "Inference for $filename took $(round(inference_time, digits=4)) seconds."
-        solution_binary = Int.(vec(g.ndata.x |> Flux.cpu)) 
-        heatmap_vec = vec(heatmap |> Flux.cpu)
+        num_nodes = g_cpu.num_nodes
+        solution_binary = Int.(vec(g_cpu.ndata.x)) 
+        heatmap_vec = vec(heatmap_cpu)
         
         sol_str = join(solution_binary, "  ")
         heatmap_str = join([@sprintf("%.1f", x) for x in heatmap_vec], " ")
