@@ -15,12 +15,15 @@ struct AnisotropicGNN <: GNN
     layers::GNNChain
 end
 
-Flux.@functor AnisotropicGNN
+Flux.@layer AnisotropicGNN
 
 """
+    AnisotropicGNN(config::GNNConfig)
+
 Constructor for AnisotropicGNN.
-Args:
-    config: GNNConfig containing in_dim num_layers, hidden_dim, and output_dim.    
+
+Parameters:
+    - 'config' : GNNConfig 
 """
 function AnisotropicGNN(config::GNNConfig)
     layers = []
@@ -42,8 +45,4 @@ end
 
 function (model::AnisotropicGNN)(g::GNNGraph, x::AbstractMatrix)
     return model.layers(g, x) 
-end
-
-function train(model::AnisotropicGNN, data)
-    # TODO
 end

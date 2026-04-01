@@ -1,5 +1,6 @@
 module Thesis
 
+using CUDA
 using Flux
 using GraphNeuralNetworks
 using Statistics

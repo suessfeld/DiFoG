@@ -1,63 +1,53 @@
 export DiffusionModel
 
-struct DiffusionModel{A<:GNN, P<:Diffusion}
-    gnn::A
-    process::P
+struct DiffusionModel{G<:GNN, P<:Diffusion}
+    gnn::G
+    method::P
 end
 
-Flux.@functor DiffusionModel
+Flux.@layer DiffusionModel
 
-function (model::DiffusionModel)(g::GNNGraph, x::AbstractMatrix)
-    return model.gnn(g, x)
+"""
+    (model::DiffusionModel)(g::GNNGraph, x::AbstractMatrix)
+
+Constructor
+
+Parameters:
+    - 'g': a graph(batch)
+    - 'x': a feature matrix
+"""
+
+function (model::DiffusionModel)(g::GNNGraph, x_t::AbstractMatrix)
+    return model.gnn(g, x_t)
 end
 
 """
-    (wrapper::GraphDiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
+    (model::DiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
 
-Forward pass compatible with diffusion compute_loss. 
-Injects time embeddings into node features.
+Defines a forward pass (callable for Flux) of the network
+
+Parameters:
+    - 'x_t': current state of the solution
+    - 'g': a graph(batch)
 """
-function (model::DiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
-    # x is (Features, TotalNodes)
-    # t is (NumGraphs,) i.e., batch size
-    
-    # 1. Calculate Time Embeddings
-    x_dim = size(x, 1)
+function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
+   
+    x_dim = size(x_t, 1)
     time_dim = model.gnn.config.in_dim - x_dim
-    
-    if time_dim <= 0
-        error("Model input dimension ($(model.gnn.config.in_dim)) must be larger than data dimension ($x_dim) to accommodate time embeddings.")
-    end
 
-    # t_emb: (TimeDim, NumGraphs)
+    # get time embeddings
     t_emb = Thesis.get_timestep_embedding(t, time_dim)
     
-    # 2. Broadcast to Nodes
-    # g.graph_indicator maps node -> graph index. 
-    # For single graphs, it might be nothing.
+    # for batch mapping
     node_indices = g.graph_indicator
     
-    if isnothing(node_indices)
-        # Fallback for single graph instances
-        # We assume all nodes belong to the first (and only) graph in the batch.
-        # We verify t is scalar-like (length 1) to prevent semantic errors.
-        if length(t) != 1
-            # If we have multiple timestamps but no way to assign them to nodes, it's an error.
-            error("Ambiguous time assignment: Batch size is $(length(t)) but graph_indicator is missing.")
-        end
-        
-        # Broadcast the single time embedding to all nodes
-        # t_emb is (TimeDim, 1). We repeat it to (TimeDim, NumNodes).
-        num_nodes = size(x, 2)
+    if isnothing(node_indices) # single graph case
+        num_nodes = size(x_t, 2)
         t_emb_nodes = repeat(t_emb, 1, num_nodes)
-    else
-        # Standard batched case: Map columns of t_emb to nodes
+    else # batched case
         t_emb_nodes = t_emb[:, node_indices]
     end
     
-    # 3. Concatenate (Features, Nodes)
-    x_input = vcat(x, t_emb_nodes)
-    
-    # 4. GNN Forward
+    x_input = vcat(x_t, t_emb_nodes)
     return model.gnn(g, x_input)
 end

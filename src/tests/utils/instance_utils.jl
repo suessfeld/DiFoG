@@ -120,7 +120,7 @@ function load_instance(filename::String)
     
     G = SimpleGraph(num_nodes)
 
-    for i in 4:length(lines)
+    for i in 3:length(lines)
         isempty(lines[i]) && continue
         parts = split(lines[i])
         u = parse(Int, parts[1])

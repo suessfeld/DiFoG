@@ -1,3 +1,4 @@
+# src/diffusion/methods/bernoulli_diffusion.jl
 using Flux
 using Statistics
 using Random
@@ -9,8 +10,9 @@ struct BernoulliDiffusion <: Diffusion
     num_timesteps::Int # defines how many steps the diffusion will take
     βs::AbstractVector{Float32} # defines the corruption ratio for a given timestamp (list of all β's)
     αs::AbstractVector{Float32} # cumulative product of α to skip steps
+end
 
-    function BernoulliDiffusion(num_timesteps::Int=1000, schedule::String="linear")
+function BernoulliDiffusion(num_timesteps::Int=1000, schedule::String="linear")
 
         # TODO: maybe make β-bounds adjustable? The parameters are hardcoded from the DIFUSCO paper
         if schedule == "linear"
@@ -30,14 +32,13 @@ struct BernoulliDiffusion <: Diffusion
             error("Unknown schedule: $schedule")
         end
         
-        βs = Float32.(βs) # TODO: Check with GPU what is the fastest here (and whats needed mathematically)
+        βs = Float32.(βs) 
         one_minus_2β = 1.0f0 .- 2.0f0 .* βs # direct consequence of the matrix Qₜ
         αs = cumprod(one_minus_2β) # precalculate all α values.
-        new(num_timesteps, βs, αs)
+        return BernoulliDiffusion(num_timesteps, βs, αs)
     end
-end
 
-Flux.@functor BernoulliDiffusion ()
+Flux.@layer BernoulliDiffusion
 
 """
     q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{Int})
@@ -63,11 +64,13 @@ function q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{
     
     prob_keep = 0.5f0 .* (1.0f0 .+ ᾱₜ_reshaped) # q(xₜ=x₀|x₀)=(1+ᾱₜ)/2 - describes the probability to keep
 
-    noise = rand(Float32, size(x_0))
+    # Device agnostic randomness matching the type of x_0 (CPU or GPU)
+    noise = rand!(similar(x_0))
     flipped = 1.0f0 .- x_0
     should_flip = noise .> prob_keep
     
-    return x_0 .* (.!should_flip) .+ flipped .* should_flip
+    # ifelse safely handles conditional assignments on CUDA without scalar fallback
+    return ifelse.(should_flip, flipped, x_0)
 end
 
 """
@@ -79,22 +82,24 @@ Parameters:
     - 'diffusion': diffusion method
     - 'model': current model
     - 'x_0': represents the starting solution without any corruption
-    - 'g': 
+    - 'g': a graph
 """
 function compute_loss(diffusion::BernoulliDiffusion, model, x_0::AbstractArray, g)
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1 # optimize training with multiple graph inputs
-    t = rand(1:diffusion.num_timesteps, batch_size) # for denoising always a random timestep is used.
+
+    t_cpu = rand(1:diffusion.num_timesteps, batch_size) # for denoising always a random timestep is used.
+    t_dev = Flux.gpu(t_cpu) # Shift indices to match the device (GPU)
 
     if hasproperty(g, :graph_indicator) && !isnothing(g.graph_indicator)
-        t_nodes = t[g.graph_indicator]
+        t_nodes = t_dev[g.graph_indicator]
     else
         num_nodes = size(x_0, 2)
-        t_nodes = fill(t[1], num_nodes)
+        t_nodes = Flux.gpu(fill(t_cpu[1], num_nodes))
     end
     
     x_t = q(diffusion, x_0, t_nodes) # corruption step
     
-    pred_logits = model(x_t, t, g) # forward pass
+    pred_logits = model(x_t, t_dev, g) # forward pass
     
     return Flux.logitbinarycrossentropy(pred_logits, x_0) # loss
 end
@@ -110,24 +115,30 @@ Parameters:
     - 'x_0_pred': the prediction for x_0 (by the model)
     - 't': the timestep
 """
-
 function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int)
-    βₜ = diffusion.βs[t]
-    ᾱₜ = diffusion.αs[t]
-    ᾱₜ₋₁ = t > 1 ? diffusion.αs[t-1] : 1.0f0
+    βₜ = diffusion.βs[t:t] # [t:t] syntax keeps array in GPU
+    ᾱₜ = diffusion.αs[t:t]
+    
+    if t > 1
+        ᾱₜ₋₁ = diffusion.αs[t-1:t-1]
+    else
+        # Match device of αs and fill with 1.0
+        ᾱₜ₋₁ = similar(diffusion.αs, 1)
+        fill!(ᾱₜ₋₁, 1.0f0)
+    end
     
     # q(x_t | x_{t-1} = 1)
-    term_1 = x_t .* (1.0f0 - βₜ) .+ (1.0f0 .- x_t) .* βₜ
+    term_1 = x_t .* (1.0f0 .- βₜ) .+ (1.0f0 .- x_t) .* βₜ
     
     # eq 5 evaluated for x_0 = 1: q(x_{t-1}=1 | x_t, x_0=1)
     # => ( q(x_t | x_{t-1}=1) * q(x_{t-1}=1 | x_0=1) ) / q(x_t | x_0=1)
-    term_2 = (term_1 .* 0.5f0 .* (1.0f0 + ᾱₜ₋₁)) ./ 
-                                   (x_t .* 0.5f0 .* (1.0f0 + ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 - ᾱₜ))
+    term_2 = (term_1 .* 0.5f0 .* (1.0f0 .+ ᾱₜ₋₁)) ./ 
+                                   (x_t .* 0.5f0 .* (1.0f0 .+ ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 .- ᾱₜ))
                                    
     # eq 5 evaluated for x_0 = 0: q(x_{t-1}=1 | x_t, x_0=0)
     # =>( q(x_t | x_{t-1}=1) * q(x_{t-1}=1 | x_0=0) ) / q(x_t | x_0=0)
-    term_3 = (term_1 .* 0.5f0 .* (1.0f0 - ᾱₜ₋₁)) ./ 
-                                   (x_t .* 0.5f0 .* (1.0f0 - ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 + ᾱₜ))
+    term_3 = (term_1 .* 0.5f0 .* (1.0f0 .- ᾱₜ₋₁)) ./ 
+                                   (x_t .* 0.5f0 .* (1.0f0 .- ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 .+ ᾱₜ))
     
     # eq 6 p_θ(x_{t-1}=1 | x_t)
     term_4 = x_0_pred .* term_2 .+ (1.0f0 .- x_0_pred) .* term_3
@@ -149,7 +160,7 @@ Parameters:
 """
 function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, g)
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
-    t_batch = fill(t, batch_size)
+    t_batch = fill(t, batch_size) |> Flux.gpu
     
     logits = model(x_t, t_batch, g)
 
@@ -159,7 +170,7 @@ function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, g)
     # p_θ_xₜ₋₁₌₁
     term2 = posterior_prob(diffusion, x_t, term_1, t)
     
-    noise = rand(Float32, size(x_t))
+    noise = rand!(similar(x_t))
     x_t₋₁ = Float32.(noise .< term2)
     
     return x_t₋₁
@@ -177,24 +188,17 @@ Represents an inference call and produces a heatmap for the provided input
     - 'g': The input graph which will be predicted
 """
 function sample_heatmap(diffusion::BernoulliDiffusion, model, shape, g)
-    x = Float32.(rand(Float32, shape) .> 0.5f0) # start with noise
+    # Initialize randomly distributed GPU state 
+    x_cpu = Float32.(rand(Float32, shape) .> 0.5f0)
+    x = Flux.gpu(x_cpu)
 
     for t in reverse(2:diffusion.num_timesteps) #TODO: Currrently strictly iterative without any skips (DIFUSCO paper does jumps of 50).
         x = p(diffusion, model, x, t, g)
     end
     
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
-    logits = model(x, fill(1, batch_size), g)
+    t_batch = Flux.gpu(fill(1, batch_size))
+    
+    logits = model(x, t_batch, g)
     return Flux.sigmoid.(logits)
 end
-
-#TODO: Decide whether this is actually needed. Heatmap sampling is the preferred method in DIFUSCO
-"""
-function sample(diff::BernoulliDiffusion, model, shape, g)
-    x = Float32.(rand(Float32, shape) .> 0.5f0)
-    for t in reverse(1:diff.num_timesteps)
-        x = p_sample(diff, model, x, t, g)
-    end
-    return x
-end
-"""

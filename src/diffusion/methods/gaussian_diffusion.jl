@@ -50,7 +50,7 @@ struct GaussianDiffusion <: Diffusion
     end
 end
 
-Flux.@functor GaussianDiffusion ()
+Flux.@layer GaussianDiffusion
 
 # corruption step, see page 4 of DIFUSCO
 function q_sample(diff::GaussianDiffusion, x_0::AbstractArray, t::AbstractVector{Int}, noise::AbstractArray)
@@ -120,14 +120,3 @@ function sample_heatmap(diff::GaussianDiffusion, model, shape, g)
     end
     return 0.5f0 .* (x .+ 1.0f0)
 end
-
-# TODO: decide whether this is actually needed. Heatmap sampling is the preferred method.
-"""
-function sample(diff::GaussianDiffusion, model, shape, g)
-    x = randn(Float32, shape)
-    for t in reverse(1:diff.num_timesteps)
-        x = p_sample(diff, model, x, t, g)
-    end
-    return Float32.(x .> 0)
-end
-"""

@@ -85,7 +85,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, training_pairs; ep
         for (g, _) in shuffled_data
             x_start = g.ndata.x 
             val, grads = Flux.withgradient(model) do m
-                Thesis.compute_loss(m.process, m, x_start, g)
+                Thesis.compute_loss(m.method, m, x_start, g)
             end
             Flux.update!(optim, model, grads[1])
             epoch_loss += val
@@ -108,10 +108,13 @@ function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_di
         num_nodes = g.num_nodes
         shape = (1, num_nodes)
         
-        heatmap = Thesis.sample_heatmap(model.process, model, shape, g)
+        inference_time = @elapsed begin
+            heatmap = Thesis.sample_heatmap(model.process, model, shape, g)
+        end
         
-        solution_binary = Int.(vec(g.ndata.x)) 
-        heatmap_vec = vec(heatmap)
+        @info "Inference for $filename took $(round(inference_time, digits=4)) seconds."
+        solution_binary = Int.(vec(g.ndata.x |> Flux.cpu)) 
+        heatmap_vec = vec(heatmap |> Flux.cpu)
         
         sol_str = join(solution_binary, "  ")
         heatmap_str = join([@sprintf("%.1f", x) for x in heatmap_vec], " ")
