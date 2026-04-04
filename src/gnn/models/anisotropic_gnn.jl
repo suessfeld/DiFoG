@@ -26,21 +26,21 @@ Parameters:
     - 'config' : GNNConfig 
 """
 function AnisotropicGNN(config::GNNConfig)
-    layers = []
-    
     if config.num_layers == 1
-        push!(layers, ResGatedGraphConv(config.in_dim => config.output_dim, relu))
+        chain = GNNChain(ResGatedGraphConv(config.in_dim => config.output_dim, relu))
     else
-        push!(layers, ResGatedGraphConv(config.in_dim => config.hidden_dim, relu))
+        layers = Any[ResGatedGraphConv(config.in_dim => config.hidden_dim, relu)]
         
         for _ in 2:(config.num_layers - 1)
             push!(layers, ResGatedGraphConv(config.hidden_dim => config.hidden_dim, relu))
         end
         
         push!(layers, ResGatedGraphConv(config.hidden_dim => config.output_dim))
+        
+        chain = GNNChain(Tuple(layers)...)
     end
     
-    return AnisotropicGNN(config, GNNChain(layers...))
+    return AnisotropicGNN(config, chain)
 end
 
 function (model::AnisotropicGNN)(g::GNNGraph, x::AbstractMatrix)

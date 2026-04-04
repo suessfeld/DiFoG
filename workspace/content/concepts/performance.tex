@@ -1,0 +1,71 @@
+\subsection{Performance}
+
+\subsubsection{Run 1 (batchsize=64)}
+\begin{table}[!ht]
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
+Batch to GPU       & 0.000562                  & 0.000094                    & 9                         \\
+Forward Pass       & 0.004930                  & 0.000173                    & 8                         \\
+Update             & 0.435872                  & 0.103598                    & 8                         \\ \hline
+\end{tabular}
+\caption{Average execution times for Run 1.}
+\label{tab:run1}
+\end{table}
+
+\subsubsection{Run 2 (batchsize=64)}
+\begin{table}[!ht]
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
+Batch to GPU       & 0.005396                  & 0.000362                    & 13                        \\
+Forward Pass       & 0.295671                  & 0.144587                    & 13                        \\
+Update             & 0.000833                  & 0.000284                    & 14                        \\ \hline
+\end{tabular}
+\caption{Average execution times for Run 2.}
+\label{tab:run2}
+\end{table}
+
+\subsubsection{Run 3 (batchsize=128)}
+\begin{table}[!ht]
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Operation} & \textbf{Steady State Avg (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
+Batch to GPU       & 0.075962                      & 0.111977                    & 12                        \\
+Forward Pass       & 1.059760                      & 0.301540                    & 11                        \\
+Update             & 0.001030                      & 0.000129                    & 11                        \\ \hline
+\end{tabular}
+\caption{Steady-state execution times for Run 3 (excluding warm-up).}
+\label{tab:run3}
+\end{table}
+
+\subsubsection{Run 4 (batchsize=128)}
+\begin{table}[!ht]
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
+Batch to GPU       & 0.010803                  & 0.000487                    & 14                        \\
+Forward Pass       & 0.471810                  & 0.107330                    & 13                        \\
+Update             & 0.000947                  & 0.000235                    & 13                        \\ \hline
+\end{tabular}
+\caption{Average execution times for Run 4.}
+\label{tab:run4}
+\end{table}
+
+\subsubsection{Run 5 (batchsize=64)}
+\begin{table}[!ht]
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
+Batch to GPU       & 0.008962                  & 0.011407                    & 14                        \\
+Forward Pass       & 0.207235                  & 0.150588                    & 14                        \\
+Update             & 0.001056                  & 0.000213                    & 14                        \\ \hline
+\end{tabular}
+\caption{Average execution times for Run 5.}
+\label{tab:run5}
+\end{table}

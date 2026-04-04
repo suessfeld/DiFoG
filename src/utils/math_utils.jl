@@ -1,5 +1,5 @@
 using Flux
-using Zygote
+using CUDA
 
 """
     adjacency_list_to_matrix(adj_list::Vector{Vector{Int}})
@@ -28,24 +28,14 @@ Args:
 Returns:
     Embeddings of shape (D, T).
 """
-function get_timestep_embedding(timesteps::AbstractVector{Int}, embedding_dim::Int, max_period=10000)
+function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
     half = div(embedding_dim, 2)
-
-    freqs = Zygote.ignore_derivatives() do
-        f = Float32.(0:half-1) ./ Float32(half)
-        exp.(-log(Float32(max_period)) .* f) |> Flux.gpu
-    end
-
-    t = Float32.(timesteps) |> Flux.gpu   # (T,)
-    
-    args = reshape(t, :, 1) * reshape(freqs, 1, :)   # (T, half)
-
-    emb = hcat(cos.(args), sin.(args))    # (T, embedding_dim)
-    emb = permutedims(emb)                # (embedding_dim, T)
-
+    freqs = exp.(-log(Float32(max_period)) .* Float32.(0:half-1) ./ Float32(half)) |> Flux.gpu
+    t = Float32.(timesteps)
+    args = reshape(t, :, 1) .* reshape(freqs, 1, :)
+    emb = permutedims(hcat(cos.(args), sin.(args)))
     if embedding_dim % 2 == 1
         emb = vcat(emb, CUDA.zeros(Float32, 1, size(emb, 2)))
     end
-
     return emb
 end

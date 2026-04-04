@@ -50,58 +50,51 @@ Parameters:
     - 'x_0': represents the starting solution without any corruption
     - 't': represents the timestep which is relevant for the current step. In vector format for parallelization
 """
-function q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{Int})
-    ᾱₜ = diffusion.αs[t]
+function q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{<:Integer})
+    ᾱₜ = diffusion.αs[t]
 
-    nd = ndims(x_0) # consider dimension of input
-    if nd == 2
-        target_shape = (1, length(t))
-    else
-        target_shape = (1, 1, length(t))
-    end
-    
-    ᾱₜ_reshaped = reshape(ᾱₜ, target_shape)
-    
-    prob_keep = 0.5f0 .* (1.0f0 .+ ᾱₜ_reshaped) # q(xₜ=x₀|x₀)=(1+ᾱₜ)/2 - describes the probability to keep
+    nd = ndims(x_0)
+    target_shape = nd == 2 ? (1, length(t)) : (1, 1, length(t))
+    ᾱₜ_reshaped = reshape(ᾱₜ, target_shape)
 
-    # Device agnostic randomness matching the type of x_0 (CPU or GPU)
-    noise = rand!(similar(x_0))
+    prob_keep = 0.5f0 .* (1.0f0 .+ ᾱₜ_reshaped)
+
+    noise = CUDA.rand(Float32, size(x_0))  # ← explicit CUDA RNG, no deadlock
     flipped = 1.0f0 .- x_0
     should_flip = noise .> prob_keep
-    
-    # ifelse safely handles conditional assignments on CUDA without scalar fallback
+
     return ifelse.(should_flip, flipped, x_0)
 end
 
 """
-    compute_loss(diff::BernoulliDiffusion, model, x_0::AbstractArray, g)
+    corrupt_batch(diff::BernoulliDiffusion, x_0::AbstractArray, g)
 
 Describes one forward step (corruption step) in the diffusion process. See page 4 of DIFUSCO paper.
 
 Parameters:
     - 'diffusion': diffusion method
-    - 'model': current model
     - 'x_0': represents the starting solution without any corruption
     - 'g': a graph
 """
-function compute_loss(diffusion::BernoulliDiffusion, model, x_0::AbstractArray, g)
-    batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1 # optimize training with multiple graph inputs
+function corrupt_batch(diffusion::BernoulliDiffusion, x_0::AbstractArray, g::GNNGraph)
+    batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
 
-    t_cpu = rand(1:diffusion.num_timesteps, batch_size) # for denoising always a random timestep is used.
-    t_dev = Flux.gpu(t_cpu) # Shift indices to match the device (GPU)
+    t_cpu = rand(Int32(1):Int32(diffusion.num_timesteps), batch_size)
+    t_device = Flux.gpu(t_cpu)
 
     if hasproperty(g, :graph_indicator) && !isnothing(g.graph_indicator)
-        t_nodes = t_dev[g.graph_indicator]
+        t_nodes = t_device[g.graph_indicator]
     else
         num_nodes = size(x_0, 2)
-        t_nodes = Flux.gpu(fill(t_cpu[1], num_nodes))
+        t_nodes = Flux.gpu(fill(Int32(t_cpu[1]), num_nodes))
     end
-    
-    x_t = q(diffusion, x_0, t_nodes) # corruption step
-    
-    pred_logits = model(x_t, t_dev, g) # forward pass
-    
-    return Flux.logitbinarycrossentropy(pred_logits, x_0) # loss
+
+    corrupted_x = q(diffusion, x_0, t_nodes)
+    return corrupted_x, t_device, x_0
+end
+
+function compute_loss_value(::BernoulliDiffusion, preds::AbstractArray, target::AbstractArray)
+    return Flux.logitbinarycrossentropy(preds, target) # loss
 end
 
 """
@@ -170,8 +163,8 @@ function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, g)
     # p_θ_xₜ₋₁₌₁
     term2 = posterior_prob(diffusion, x_t, term_1, t)
     
-    noise = rand!(similar(x_t))
-    x_t₋₁ = Float32.(noise .< term2)
+    noise = CUDA.rand(Float32, size(x_t))
+    x_t₋₁ = ifelse.(noise .< term2, 1.0f0, 0.0f0)    
     
     return x_t₋₁
 end

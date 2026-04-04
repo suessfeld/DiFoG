@@ -53,7 +53,7 @@ end
 Flux.@layer GaussianDiffusion
 
 # corruption step, see page 4 of DIFUSCO
-function q_sample(diff::GaussianDiffusion, x_0::AbstractArray, t::AbstractVector{Int}, noise::AbstractArray)
+function q_sample(diff::GaussianDiffusion, x_0::AbstractArray, t::AbstractVector{<:Integer}, noise::AbstractArray)
     sqrt_alpha = diff.sqrt_αs_cumprod[t]
     sqrt_one_minus_alpha = diff.sqrt_one_minus_αs_cumprod[t]
     
