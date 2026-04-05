@@ -1,4 +1,3 @@
-# src/tests/utils/data_utils.jl
 module DataUtils
 
 using Flux
@@ -14,26 +13,44 @@ export LazyGraphDataset, load_lazy_collection, split_lazy_dataset
 struct LazyGraphDataset
     instances_dir::String
     solutions_dir::String
-    valid_files::Vector{String}
+    files::Vector{String}
 end
 
-Base.length(d::LazyGraphDataset) = length(d.valid_files)
+# define length
+Base.length(d::LazyGraphDataset) = length(d.files)
 
+"""
+    function normalize_graph(g::GNNGraph)
+
+Normalizes an input graph so it uses correct types for GPU usage.
+
+Parameters:
+    'g': the graph that will be normalized
+"""
 function normalize_graph(g::GNNGraph)
-    s, t = edge_index(g)  # always returns plain Int vectors
+    s, t = edge_index(g)
     return GNNGraph(
-        Int32.(s), Int32.(t);
+        Int32.(s), Int32.(t); # Force correct typing!
         num_nodes = g.num_nodes,
-        ndata     = g.ndata,   # preserves :x
+        ndata     = g.ndata,
         edata     = g.edata,
         gdata     = g.gdata,
     )
 end
 
-function Base.getindex(d::LazyGraphDataset, i::Int)
-    file = d.valid_files[i]
-    inst_path = joinpath(d.instances_dir, file)
-    sol_path = joinpath(d.solutions_dir, replace(file, ".txt" => "_solution.txt"))
+"""
+    Base.getindex(d::LazyGraphDataset, i::Int)
+
+Returns a graph of a LazyGraphDataset with a given index.
+
+Parameters:
+    -'dataset': the dataset holding all graphs
+    -'i': index of the graph
+"""
+function Base.getindex(dataset::LazyGraphDataset, i::Int)
+    file = dataset.files[i]
+    inst_path = joinpath(dataset.instances_dir, file)
+    sol_path = joinpath(dataset.solutions_dir, replace(file, ".txt" => "_solution.txt"))
     
     raw_g = load_instance(inst_path)
     lines = readlines(sol_path)
@@ -46,16 +63,35 @@ function Base.getindex(d::LazyGraphDataset, i::Int)
     end
     
     gnn_g = GNNGraph(raw_g, ndata=(; x=x_0))
-    return (normalize_graph(gnn_g), file)  # ← only change to this function
+    return (normalize_graph(gnn_g), file)
 end
 
-function Base.getindex(d::LazyGraphDataset, idxs::AbstractVector{<:Integer})
-    tasks = map(idxs) do i
-        Threads.@spawn d[i]
+"""
+    Base.getindex(d::LazyGraphDataset, i::Int)
+
+Returns a batch of graphs from a LazyGraphDataset with a given vector of indices. 
+Runs multithreaded to speed up batch-wise IO operations
+
+Parameters:
+    -'dataset': the dataset holding all graphs
+    -'is': indeces of the graphs
+"""
+function Base.getindex(dataset::LazyGraphDataset, inds::AbstractVector{<:Integer})
+    tasks = map(inds) do i
+        Threads.@spawn dataset[i]
     end
     return fetch.(tasks)
 end
 
+"""
+    load_lazy_collection(instance_collection::String)
+
+Loads a collection of training data lazily.
+Instead of loading the entire dataset into memory, this function provides a proxy of the dataset which will be fetched on time.
+
+Parameters:
+    -'instance_collection': name of the collection which will be fetched from the INSTANCES_PATH directory.
+"""
 function load_lazy_collection(instance_collection::String)
     collection_dir = joinpath(pkgdir(Thesis), ENV["INSTANCES_PATH"], instance_collection)
     instances_dir = joinpath(collection_dir, "instances")
@@ -67,7 +103,7 @@ function load_lazy_collection(instance_collection::String)
     end
     
     if !isdir(solutions_dir)
-        @warn "Solutions directory not found. Please run the Solver Job first."
+        @warn "Solutions directory not found. Are the instances solved yet?"
         return LazyGraphDataset(instances_dir, solutions_dir, String[]), inferences_dir
     end
 
@@ -85,9 +121,18 @@ function load_lazy_collection(instance_collection::String)
     return LazyGraphDataset(instances_dir, solutions_dir, valid_files), inferences_dir
 end
 
+"""
+    split_lazy_dataset(dataset::LazyGraphDataset, train_ratio::Float64=0.9)
+
+Splits a LazyGraphDataset into a training and test set and returns both.
+
+Parameters:
+    -'dataset': the dataset which will be split
+    -'train_ratio': the ratio of the training dataset. The rest will be testdata.
+"""
 function split_lazy_dataset(dataset::LazyGraphDataset, train_ratio::Float64=0.9)
     total = length(dataset)
-    shuffled_files = shuffle(dataset.valid_files)
+    shuffled_files = shuffle(dataset.files)
     
     train_size = max(1, round(Int, train_ratio * total))
     
@@ -98,53 +143,6 @@ function split_lazy_dataset(dataset::LazyGraphDataset, train_ratio::Float64=0.9)
     test_dataset = LazyGraphDataset(dataset.instances_dir, dataset.solutions_dir, test_files)
     
     return train_dataset, test_dataset
-end
-
-function load_collection(instance_collection::String)
-    collection_dir = joinpath(pkgdir(Thesis), ENV["INSTANCES_PATH"], instance_collection)
-    instances_dir = joinpath(collection_dir, "instances")
-    solutions_dir = joinpath(collection_dir, "solutions")
-    inferences_dir = joinpath(collection_dir, "inferences")
-
-    if !isdir(inferences_dir)
-        mkpath(inferences_dir)
-    end
-    
-    all_pairs = Tuple{GNNGraph, String}[] 
-    
-    if !isdir(solutions_dir)
-        @warn "Solutions directory not found. Please run the Solver Job first."
-        return all_pairs, inferences_dir
-    end
-
-    files = sort(readdir(instances_dir))
-    for file in files
-        if endswith(file, ".txt")
-            inst_path = joinpath(instances_dir, file)
-            sol_path = joinpath(solutions_dir, replace(file, ".txt" => "_solution.txt"))
-            
-            if isfile(sol_path)
-                raw_g = load_instance(inst_path)
-                lines = readlines(sol_path)
-                if length(lines) >= 3
-                    mask_str = split(lines[3])
-                    mask = parse.(Float32, mask_str)
-                    x_0 = reshape(mask, 1, :)
-                    gnn_g = GNNGraph(raw_g, ndata=(; x=x_0))
-                    push!(all_pairs, (gnn_g, file))
-                end
-            end
-        end
-    end
-    return all_pairs, inferences_dir
-end
-
-function split_dataset(all_pairs::Vector{Tuple{GNNGraph, String}}, train_ratio::Float64=0.9)
-    total_instances = length(all_pairs)
-    test_size = max(1, round(Int, (1.0 - train_ratio) * total_instances))
-    train_size = total_instances - test_size
-    shuffled_pairs = shuffle(all_pairs)
-    return shuffled_pairs[1:train_size], shuffled_pairs[train_size+1:end]
 end
 
 end

@@ -23,6 +23,13 @@ function (model::DiffusionModel)(g::GNNGraph, x_t::AbstractMatrix)
     return model.gnn(g, x_t)
 end
 
+
+_embed_timesteps(t_emb, ::Nothing, x_t) =
+    repeat(t_emb, 1, size(x_t, 2))
+
+_embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
+    t_emb[:, node_indices]
+
 """
     (model::DiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
 
@@ -32,12 +39,6 @@ Parameters:
     - 'x_t': current state of the solution
     - 'g': a graph(batch)
 """
-_embed_timesteps(t_emb, ::Nothing, x_t) =
-    repeat(t_emb, 1, size(x_t, 2))
-
-_embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
-    t_emb[:, node_indices]
-
 function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer}, g::GNNGraph)
     x_dim    = size(x_t, 1)
     time_dim = model.gnn.config.in_dim - x_dim
@@ -49,6 +50,17 @@ function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer
     return result
 end
 
+"""
+    train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
+
+Main training loop of a diffusion model.
+
+Parameters:
+    - 'model': the model to train
+    - 'optim': the optimizer
+    - 'data_loader': dataloader which loads training data lazily
+    - 'epochs': the epochs to train for
+"""
 function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
     loss_history = Float32[]
     @info "Starting training"
@@ -67,20 +79,20 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
             batch_size = length(names_batch)
             
             batch_time = @elapsed begin
-                g_gpu = g_batch |> Flux.gpu
-                x_start = g_gpu.ndata.x 
-                x_t, t_dev, target = corrupt_batch(model.method, x_start, g_gpu)
+                g_batch = g_batch |> Flux.gpu # move entire batch to gpu
+                x_start = g_batch.ndata.x 
+                x_t, timesteps, x_0 = corrupt_batch(model.method, x_start, g_batch)
                 
-                val, grads = compute_grad_barrier(model.gnn, model.method, x_t, t_dev, g_gpu, target)
+                loss, grads = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0)
                 
                 Flux.update!(optim, model.gnn, grads[1])
             end
             
             avg_time_per_instance = batch_time / batch_size
             
-            @debug "Batch $(num_batches + 1) [$(batch_size*num_batches) instances total] | Total: $(round(batch_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
+            @info "Batch $(num_batches + 1) [$(batch_size*num_batches) instances total] | Total: $(round(batch_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
 
-            epoch_loss += val
+            epoch_loss += loss
             num_batches += 1
         end
         
@@ -88,6 +100,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
         push!(loss_history, avg_loss)
         @info "Epoch $epoch | Avg Loss: $avg_loss"
         
+        # TODO: Check if those two lines are really necessary for GPU optimization
         GC.gc(true)
         CUDA.reclaim()
     end
@@ -95,27 +108,48 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
     return loss_history
 end
 
-function infer(model::DiffusionModel, g_batch::GNNGraph)
-    g_gpu = g_batch |> Flux.gpu
+"""
+    infer(model::DiffusionModel, g_batch::GNNGraph)
+
+Inference call to the trained model. Moves the entire batch to the GPU and processes the inference there.
+
+Parameters:
+    - 'model': the model which will be infered
+    - 'batch': the batch of graphs which will be passed for inference
+"""
+function infer(model::DiffusionModel, batch::GNNGraph)
+    g_gpu = batch |> Flux.gpu
     shape = (1, g_gpu.num_nodes)
     heatmap_gpu = Thesis.sample_heatmap(model.method, model, shape, g_gpu)
     return heatmap_gpu |> Flux.cpu
 end
 
+"""
+    compute_loss_and_gradients
 
-function compute_grad_barrier(gnn::GNN, method::Diffusion, x_t::AbstractArray, t_dev::AbstractVector, g_gpu::GNNGraph, target::AbstractArray)
+Consists of one forward and one backward pass through the network. Returns the gradient and the loss for weight adjustments.
+
+Parameters:
+    - 'gnn': the GNN of the model
+    - 'method': the diffusion method
+    - 'x_t': solution state at timestep t
+    - 'timesteps': vector containing the diffusion timesteps for each graph in the batch
+    - 'batch': the batch of graphs, already on the GPU
+    - 'x_0': the optimal solution for loss computation
+"""
+function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray)
     x_dim = size(x_t, 1)
     time_dim = gnn.config.in_dim - x_dim
-    t_emb = Thesis.get_timestep_embedding(t_dev, time_dim)
-    t_emb_nodes = isnothing(g_gpu.graph_indicator) ?
+    t_emb = Thesis.get_timestep_embedding(timesteps, time_dim)
+    t_emb_nodes = isnothing(batch.graph_indicator) ?
         repeat(t_emb, 1, size(x_t, 2)) :
-        t_emb[:, g_gpu.graph_indicator]
+        t_emb[:, batch.graph_indicator]
 
-    x_input = vcat(t_emb_nodes, x_t)  # all outside the closure
+    x_input = vcat(t_emb_nodes, x_t)
 
-    val, grads = Flux.withgradient(gnn) do gnn_inner
-        preds = gnn_inner(g_gpu, x_input)
-        compute_loss_value(method, preds, target)
+    loss, grads = Flux.withgradient(gnn) do gnn_inner # IMPORTANT TO BOX LIKE THIS FOR ZYGOTE! Otherwise each training call the gradient will be recalculated!
+        preds = gnn_inner(batch, x_input)
+        compute_loss_value(method, preds, x_0)
     end
-    return val, grads
+    return loss, grads
 end

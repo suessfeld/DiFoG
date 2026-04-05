@@ -83,10 +83,10 @@ end
     collection_name = "maxdeg_large_instances"
     num_instances = 50000
 
-    min_vertices = 800
-    max_vertices = 1000
-    min_edges = 4000
-    max_edges = 5000
+    min_vertices = 100
+    max_vertices = 200
+    min_edges = 400
+    max_edges = 500
 
     generate_collection(collection_name, num_instances, min_vertices, max_vertices, min_edges, max_edges, solve_max_degree_instance)
 end
