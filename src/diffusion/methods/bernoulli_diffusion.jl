@@ -1,4 +1,3 @@
-# src/diffusion/methods/bernoulli_diffusion.jl
 using Flux
 using Statistics
 using Random
@@ -6,6 +5,12 @@ using NNlib
 
 export BernoulliDiffusion
 
+"""
+    BernoulliDiffusion
+
+Struct to hold parameters for Discrete Diffusion with Bernoulli noise.
+Implements the framework described in Section 3.2 of the DIFUSCO paper.
+"""
 struct BernoulliDiffusion <: Diffusion
     num_timesteps::Int # defines how many steps the diffusion will take
     βs::AbstractVector{Float32} # defines the corruption ratio for a given timestamp (list of all β's)

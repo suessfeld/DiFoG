@@ -74,7 +74,7 @@ Runs multithreaded to speed up batch-wise IO operations
 
 Parameters:
     -'dataset': the dataset holding all graphs
-    -'is': indeces of the graphs
+    -'inds': indeces of the graphs
 """
 function Base.getindex(dataset::LazyGraphDataset, inds::AbstractVector{<:Integer})
     tasks = map(inds) do i

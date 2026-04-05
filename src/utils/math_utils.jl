@@ -5,6 +5,9 @@ using CUDA
     adjacency_list_to_matrix(adj_list::Vector{Vector{Int}})
 
 Converts an adjacency list to a 2xE edge matrix.
+
+Parameters:
+-'adj_list': the adjacency list to transform
 """
 function adjacency_list_to_matrix(adj_list::Vector{Vector{Int}})
     src = Int[]
@@ -22,11 +25,11 @@ end
     get_timestep_embedding(timesteps, embedding_dim, max_period=10000)
 
 Generates sinusoidal time embeddings.
-Args:
-    timesteps: Vector of integers (T,).
-    embedding_dim: Output dimension (D,).
-Returns:
-    Embeddings of shape (D, T).
+
+Parameters:
+    -'timesteps': vector of integers (T,)
+    -'embedding_dim': output dimension (D,)
+    -'max_period': max period
 """
 function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
     half = div(embedding_dim, 2)

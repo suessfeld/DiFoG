@@ -1,71 +1,27 @@
 \subsection{Performance}
 
-\subsubsection{Run 1 (batchsize=64)}
-\begin{table}[!ht]
-\centering
-\begin{tabular}{lccc}
-\hline
-\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
-Batch to GPU       & 0.000562                  & 0.000094                    & 9                         \\
-Forward Pass       & 0.004930                  & 0.000173                    & 8                         \\
-Update             & 0.435872                  & 0.103598                    & 8                         \\ \hline
-\end{tabular}
-\caption{Average execution times for Run 1.}
-\label{tab:run1}
-\end{table}
+Considerations done for performance:
+\begin{itemize}
+    \item Lazy, multithreaded I/O operations
+    \item Model loaded in GPU
+    \item Batches buffered and loaded just in time into GPU
+\end{itemize}
 
-\subsubsection{Run 2 (batchsize=64)}
-\begin{table}[!ht]
+Current results:
+\begin{table}[h]
 \centering
-\begin{tabular}{lccc}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lcccccc}
 \hline
-\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
-Batch to GPU       & 0.005396                  & 0.000362                    & 13                        \\
-Forward Pass       & 0.295671                  & 0.144587                    & 13                        \\
-Update             & 0.000833                  & 0.000284                    & 14                        \\ \hline
-\end{tabular}
-\caption{Average execution times for Run 2.}
-\label{tab:run2}
-\end{table}
-
-\subsubsection{Run 3 (batchsize=128)}
-\begin{table}[!ht]
-\centering
-\begin{tabular}{lccc}
+\textbf{Scenario} & \multicolumn{3}{c}{\textbf{Training}} & \multicolumn{3}{c}{\textbf{Inference}} \\
+& \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Batch (s)}\end{tabular} & \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Inst (s)}\end{tabular} & \textbf{Speedup} & \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Batch (s)}\end{tabular} & \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Inst (s)}\end{tabular} & \textbf{Speedup} \\
 \hline
-\textbf{Operation} & \textbf{Steady State Avg (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
-Batch to GPU       & 0.075962                      & 0.111977                    & 12                        \\
-Forward Pass       & 1.059760                      & 0.301540                    & 11                        \\
-Update             & 0.001030                      & 0.000129                    & 11                        \\ \hline
-\end{tabular}
-\caption{Steady-state execution times for Run 3 (excluding warm-up).}
-\label{tab:run3}
-\end{table}
-
-\subsubsection{Run 4 (batchsize=128)}
-\begin{table}[!ht]
-\centering
-\begin{tabular}{lccc}
+Before optimization & 0.0282 & 0.0282 & & 0.8523 & 0.8523 & \\
+\noalign{\hrule height 1.5pt}
+After optimization - batchsize 64   & 0.0328 & 0.0005 & 56.4x & 1.0608 & 0.0166 & 51.3x \\
+After optimization - batchsize 128  & 0.0601 & 0.0005 & 56.4x & 2.1070 & 0.0165 & 51.7x \\
 \hline
-\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
-Batch to GPU       & 0.010803                  & 0.000487                    & 14                        \\
-Forward Pass       & 0.471810                  & 0.107330                    & 13                        \\
-Update             & 0.000947                  & 0.000235                    & 13                        \\ \hline
 \end{tabular}
-\caption{Average execution times for Run 4.}
-\label{tab:run4}
-\end{table}
-
-\subsubsection{Run 5 (batchsize=64)}
-\begin{table}[!ht]
-\centering
-\begin{tabular}{lccc}
-\hline
-\textbf{Operation} & \textbf{Average Time (s)} & \textbf{Std. Deviation (s)} & \textbf{Iterations ($n$)} \\ \hline
-Batch to GPU       & 0.008962                  & 0.011407                    & 14                        \\
-Forward Pass       & 0.207235                  & 0.150588                    & 14                        \\
-Update             & 0.001056                  & 0.000213                    & 14                        \\ \hline
-\end{tabular}
-\caption{Average execution times for Run 5.}
-\label{tab:run5}
+\caption{Average Performance Logs and Speedup (Baseline: Before optimization - batchsize 64)}
+\label{tab:performance_logs}
 \end{table}

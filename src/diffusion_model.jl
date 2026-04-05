@@ -15,8 +15,8 @@ Flux.@layer DiffusionModel
 Constructor
 
 Parameters:
-    - 'g': a graph(batch)
-    - 'x': a feature matrix
+    -'g': a graph(batch)
+    -'x': a feature matrix
 """
 
 function (model::DiffusionModel)(g::GNNGraph, x_t::AbstractMatrix)
@@ -36,8 +36,8 @@ _embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
 Defines a forward pass (callable for Flux) of the network
 
 Parameters:
-    - 'x_t': current state of the solution
-    - 'g': a graph(batch)
+    -'x_t': current state of the solution
+    -'g': a graph(batch)
 """
 function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer}, g::GNNGraph)
     x_dim    = size(x_t, 1)
@@ -56,10 +56,10 @@ end
 Main training loop of a diffusion model.
 
 Parameters:
-    - 'model': the model to train
-    - 'optim': the optimizer
-    - 'data_loader': dataloader which loads training data lazily
-    - 'epochs': the epochs to train for
+    -'model': the model to train
+    -'optim': the optimizer
+    -'data_loader': dataloader which loads training data lazily
+    -'epochs': the epochs to train for
 """
 function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
     loss_history = Float32[]
@@ -114,8 +114,8 @@ end
 Inference call to the trained model. Moves the entire batch to the GPU and processes the inference there.
 
 Parameters:
-    - 'model': the model which will be infered
-    - 'batch': the batch of graphs which will be passed for inference
+    -'model': the model which will be infered
+    -'batch': the batch of graphs which will be passed for inference
 """
 function infer(model::DiffusionModel, batch::GNNGraph)
     g_gpu = batch |> Flux.gpu
@@ -130,12 +130,12 @@ end
 Consists of one forward and one backward pass through the network. Returns the gradient and the loss for weight adjustments.
 
 Parameters:
-    - 'gnn': the GNN of the model
-    - 'method': the diffusion method
-    - 'x_t': solution state at timestep t
-    - 'timesteps': vector containing the diffusion timesteps for each graph in the batch
-    - 'batch': the batch of graphs, already on the GPU
-    - 'x_0': the optimal solution for loss computation
+    -'gnn': the GNN of the model
+    -'method': the diffusion method
+    -'x_t': solution state at timestep t
+    -'timesteps': vector containing the diffusion timesteps for each graph in the batch
+    -'batch': the batch of graphs, already on the GPU
+    -'x_0': the optimal solution for loss computation
 """
 function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray)
     x_dim = size(x_t, 1)
