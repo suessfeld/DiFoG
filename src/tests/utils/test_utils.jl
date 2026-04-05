@@ -22,7 +22,7 @@ Parameters
     -'inferences_dir': directory to save results to
     -'batch_size': batch size for inferences
 """
-function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_dir; batch_size=128)
+function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_dir, batch_size=128)
     total_instances = length(test_pairs)
 
     @sync begin # for parallelism

@@ -2,63 +2,7 @@
 using TestItems
 using Thesis
 
-@testitem "DIFUSCO BENCHMARK TEST" setup=[BernoulliTestSetupCUDA] begin
-    using Profile
-    using Thesis
-    using Flux
-    using .BernoulliTestSetupCUDA.DataUtils: load_lazy_collection, split_lazy_dataset
-    using .BernoulliTestSetupCUDA.TestUtils: run_inference_and_save
-    
-    instance_collection="difusco_instances"
-    epochs = 1
-    learning_rate = 1e-3
-    batch_size = 4
-    time_dim = 32
-    feature_dim = 1
-    gnn_config = GNNConfig(
-        num_layers=12,
-        in_dim=feature_dim + time_dim,
-        hidden_dim=256,
-        output_dim=1
-    )
-    
-    dataset, inferences_dir = load_lazy_collection(instance_collection)
-    
-    total_instances = length(dataset)
-    @info "LazyLoaded $total_instances instance paths total."
-    
-    train_dataset, test_dataset = split_lazy_dataset(dataset, 0.9)
-    @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
-    
-    if length(train_dataset) > 0
-        gnn = AnisotropicGNN(gnn_config)
-        diffusion_process = BernoulliDiffusion(100, "cosine")
-        
-        model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu
-
-        optim = Flux.setup(
-            Flux.Optimisers.OptimiserChain(
-                Flux.Optimisers.ClipNorm(1.0f0),   # clip global gradient norm to 1.0
-                Flux.Adam(learning_rate)
-            ),
-            model.gnn
-        ) 
-        
-        train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=true, collate=true)
-        batch_types = [typeof(first(b)) for b in Iterators.take(train_loader, 5)]
-        @assert allequal(batch_types) "Graph types still vary — normalization incomplete"
-
-        loss_history = Thesis.train_diffusion_model!(model, optim, train_loader, epochs=epochs)
-        
-        @test loss_history[end] < loss_history[1]
-        
-        @info "Running Inference and saving results..." 
-        run_inference_and_save(model, test_dataset, inferences_dir)
-        @info "Inferences successfully saved to: $inferences_dir"
-    end
-end
-
-@testitem "Train Bernoulli Diffusion on DIFUSCO Instances (Performance)" setup=[BernoulliTestSetupCUDA] begin
+@testitem "Train Bernoulli Diffusion on DIFUSCO Instances" setup=[BernoulliTestSetupCUDA] begin
     using Profile
     using Thesis
     using Logging
@@ -112,7 +56,7 @@ end
         @test loss_history[end] < loss_history[1]
         
         @info "Running Inference and saving results..." 
-        run_inference_and_save(model, test_dataset, inferences_dir)
+        run_inference_and_save(model, test_dataset, inferences_dir, 128)
         @info "Inferences successfully saved to: $inferences_dir"
     end
 end
@@ -169,7 +113,7 @@ end
         @test loss_history[end] < loss_history[1]
         
         @info "Running Inference and saving results..." 
-        run_inference_and_save(model, test_dataset, inferences_dir)
+        run_inference_and_save(model, test_dataset, inferences_dir, 128)
         @info "Inferences successfully saved to: $inferences_dir"
     end
 end
@@ -225,7 +169,7 @@ end
         @test loss_history[end] < loss_history[1]
         
         @info "Running Inference and saving results..." 
-        run_inference_and_save(model, test_dataset, inferences_dir)
+        run_inference_and_save(model, test_dataset, inferences_dir, 128)
         @info "Inferences successfully saved to: $inferences_dir"
     end
 end

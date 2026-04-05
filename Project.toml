@@ -1,7 +1,7 @@
 name = "Thesis"
 uuid = "ad2ca0b9-54b2-4853-9914-e0387062c326"
-version = "0.1.0"
 authors = ["suessfeld <voill.elias@gmail.com>"]
+version = "0.1.0"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
@@ -11,6 +11,7 @@ Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GLPK = "60bf3e95-4087-53dc-ae20-288a0d20c6a6"
 GraphNeuralNetworks = "cffab07f-9bc2-4db1-8861-388f63bf7694"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 Profile = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
