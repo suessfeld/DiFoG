@@ -8,16 +8,16 @@ using Thesis
     using .DIFUSCOTestSetup.DataUtils: load_lazy_collection, split_lazy_dataset
     
     # DIFUSCO CONFIG
-    instance_collection="difusco_instances_small"
-    epochs = 1 # original = 50
+    instance_collection="difusco_instances"
+    epochs = 5 # paper = 50
     learning_rate = 1e-3
-    batch_size = 4 # original = 32
+    batch_size = 16 # paper = 32
     time_dim = 32
     feature_dim = 1
     gnn_config = GNNConfig(
-        num_layers=12,
+        num_layers=6, # paper = 12
         in_dim=feature_dim + time_dim,
-        hidden_dim=256,
+        hidden_dim=128, # paper = 256
         output_dim=1
     )
     

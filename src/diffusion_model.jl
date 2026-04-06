@@ -99,10 +99,6 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
         avg_loss = epoch_loss / max(1, num_batches)
         push!(loss_history, avg_loss)
         @info "Epoch $epoch | Avg Loss: $avg_loss"
-        
-        # TODO: Check if those two lines are really necessary for GPU optimization
-        GC.gc(true)
-        CUDA.reclaim()
     end
     
     return loss_history
