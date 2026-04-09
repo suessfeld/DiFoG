@@ -10,6 +10,8 @@ export GaussianDiffusion
 
 Struct to hold parameters for Continuous Diffusion with Gaussian noise.
 Implements the framework described in Section 3.2 of the DIFUSCO paper.
+
+Currently NOT maintained, as BernoulliDiffusion outperforms Gaussian!
 """
 struct GaussianDiffusion <: Diffusion
     num_timesteps::Int

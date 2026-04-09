@@ -9,7 +9,6 @@ export save_model, load_model!
 Saves the state of the GNN model to a JLD2 file. Moves the model to CPU before saving.
 """
 function save_model(model::DiffusionModel, filepath::String)
-    # Extract only the trainable parameters of the GNN on the CPU
     model_state = Flux.state(model.gnn |> Flux.cpu)
     jldsave(filepath; model_state)
     @info "Model successfully saved to $filepath"

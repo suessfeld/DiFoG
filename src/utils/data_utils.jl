@@ -10,6 +10,9 @@ using ..InstanceUtils: load_instance
 export load_collection, split_dataset
 export LazyGraphDataset, load_lazy_collection, split_lazy_dataset
 
+"""
+A lazy wrapper for a dataset used for training and testing. Only loads filenames and loads batches just in time for training.
+"""
 struct LazyGraphDataset
     instances_dir::String
     solutions_dir::String
@@ -30,7 +33,7 @@ Parameters:
 function normalize_graph(g::GNNGraph)
     s, t = edge_index(g)
     return GNNGraph(
-        Int32.(s), Int32.(t); # Force correct typing!
+        Int32.(s), Int32.(t); # Force correct typing!!! By default those are ::Int64 which most GPUs dont like!
         num_nodes = g.num_nodes,
         ndata     = g.ndata,
         edata     = g.edata,
@@ -70,7 +73,7 @@ end
     Base.getindex(d::LazyGraphDataset, i::Int)
 
 Returns a batch of graphs from a LazyGraphDataset with a given vector of indices. 
-Runs multithreaded to speed up batch-wise IO operations
+Runs multithreaded to speed up batch-wise IO operations.
 
 Parameters:
     -'dataset': the dataset holding all graphs

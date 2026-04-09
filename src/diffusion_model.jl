@@ -1,5 +1,8 @@
 export DiffusionModel
 
+"""
+Represents a Diffusionmodel consisting of a general GNN and a diffusion method. 
+"""
 struct DiffusionModel{G<:GNN, P<:Diffusion}
     gnn::G
     method::P
@@ -31,7 +34,7 @@ _embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
 """
     (model::DiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
 
-Defines a forward pass (callable for Flux) of the network
+Defines a forward pass (callable for Flux) of the network.
 
 Parameters:
     -'x_t': current state of the solution
@@ -51,7 +54,7 @@ end
 """
     train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
 
-Main training loop of a diffusion model.
+Main training loop for the diffusion model.
 
 Parameters:
     -'model': the model to train
@@ -143,7 +146,7 @@ function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractAr
 
     loss, grads = Flux.withgradient(gnn) do gnn_inner # IMPORTANT TO BOX LIKE THIS FOR ZYGOTE! Otherwise each training call the gradient will be recalculated!
         preds = gnn_inner(batch, x_input)
-        compute_loss_value(method, preds, x_0)
+        calculate_loss(method, preds, x_0)
     end
     return loss, grads
 end

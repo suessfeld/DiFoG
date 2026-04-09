@@ -1,5 +1,8 @@
 export GNNConfig
 
+"""
+Represents a basic configuration of a GNN. 
+"""
 struct GNNConfig
     num_layers::Int
     in_dim::Int

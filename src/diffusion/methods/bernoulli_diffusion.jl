@@ -17,6 +17,8 @@ struct BernoulliDiffusion <: Diffusion
     αs::AbstractVector{Float32} # cumulative product of α to skip steps
 end
 
+Flux.@layer BernoulliDiffusion
+
 function BernoulliDiffusion(num_timesteps::Int=1000, schedule::String="linear")
 
     # TODO: maybe make β-bounds adjustable? The parameters are hardcoded from the DIFUSCO paper
@@ -42,8 +44,6 @@ function BernoulliDiffusion(num_timesteps::Int=1000, schedule::String="linear")
     αs = cumprod(one_minus_2β) # precalculate all α values.
     return BernoulliDiffusion(num_timesteps, βs, αs)
 end
-
-Flux.@layer BernoulliDiffusion
 
 """
     q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{Int})
@@ -98,7 +98,17 @@ function corrupt_batch(diffusion::BernoulliDiffusion, x_0::AbstractArray, g::GNN
     return corrupted_x, t_device, x_0
 end
 
-function compute_loss_value(::BernoulliDiffusion, preds::AbstractArray, target::AbstractArray)
+"""
+    function calculate_loss(::BernoulliDiffusion, preds::AbstractArray, target::AbstractArray)
+
+Calculates loss between two solution states.
+
+Parameters:
+        -'preds': prediction
+        -'target': target to calculate loss against
+"""
+
+function calculate_loss(::BernoulliDiffusion, preds::AbstractArray, target::AbstractArray)
     return Flux.logitbinarycrossentropy(preds, target) # loss
 end
 
@@ -106,10 +116,15 @@ end
     get_inference_schedule(num_timesteps::Int, inference_steps::Int, schedule::String="cosine")
 
 Generates a sub-sequence of timesteps τ for accelerated inference.
+
+Parameters:
+    - 'num_timesteps': diffusion method
+    - 'inference_steps': amound of steps that will be used for inference
+    - 'schedule': scheduling strategy. See DIFUSCO paper for comparison, but cosine is preferred
 """
 function get_inference_schedule(num_timesteps::Int, inference_steps::Int, schedule::String="cosine")
-    if inference_steps >= num_timesteps
-        return collect(1:num_timesteps)
+    if inference_steps >= num_timesteps # might not really happen, but just in case
+        return collect(1:num_timesteps) 
     end
 
     if schedule == "linear"
@@ -119,7 +134,7 @@ function get_inference_schedule(num_timesteps::Int, inference_steps::Int, schedu
         c = 1.0 / inference_steps
         return [max(1, floor(Int, cos((1.0 - c * i) * (π / 2.0)) * num_timesteps)) for i in 1:inference_steps]
     else
-        error("Unknown inference schedule: $schedule")
+        error("Unknown inference schedule: $schedule") # just in case
     end
 end
 
@@ -135,7 +150,7 @@ Parameters:
     - 't': the timestep
 """
 function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int, s::Int)
-  ᾱₜ = diffusion.αs[t:t]
+  ᾱₜ = diffusion.αs[t:t] # important to do it like this, to keep it in the GPU!
 
     if s > 0
         ᾱₛ = diffusion.αs[s:s]
@@ -205,6 +220,8 @@ Represents an inference call and produces a heatmap for the provided input
     - 'model': the current model
     - 'shape': shape of the graph
     - 'g': The input graph which will be predicted
+    - 'inference_steps': for now a default at 50 (see DIFUSCO paper)
+    - 'schedule': for default cosine (see DIFUSCO paper)
 """
 function sample_heatmap(diffusion::BernoulliDiffusion, model, shape::Tuple, g::GNNGraph; inference_steps::Int=50, schedule::String="cosine")
     x_cpu = Float32.(rand(Float32, shape) .> 0.5f0) 
