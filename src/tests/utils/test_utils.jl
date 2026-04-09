@@ -34,6 +34,10 @@ function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_di
             filenames = [item[2] for item in batch]
             node_counts = [g.num_nodes for g in graphs]
 
+            if i == 3
+                #@profview Thesis.infer(model, Flux.batch(graphs))
+            end
+
             # batch and infer
             batch_time = @elapsed begin
                 heatmaps = Thesis.infer(model, Flux.batch(graphs))

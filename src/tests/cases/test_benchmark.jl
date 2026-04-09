@@ -76,7 +76,7 @@ end
 
     dataset, inferences_dir = load_lazy_collection(instance_collection)
     
-    _, test_dataset = split_lazy_dataset(dataset, 0.5)
+    _, test_dataset = split_lazy_dataset(dataset, 0.9)
 
     if length(test_dataset) > 0
         gnn = AnisotropicGNN(gnn_config)

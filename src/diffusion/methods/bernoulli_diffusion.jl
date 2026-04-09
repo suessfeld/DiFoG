@@ -135,17 +135,11 @@ Parameters:
     - 't': the timestep
 """
 function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int, s::Int)
-    ᾱₜ = diffusion.αs[t:t]
+    ᾱₜ = diffusion.αs[t] # important to do like that to avoid memory allocation and use broadcasting efficiently
+    ᾱₛ = s > 0 ? diffusion.αs[s] : 1.0f0
 
-    if s > 0
-        ᾱₛ = diffusion.αs[s:s]
-    else
-        ᾱₛ = similar(diffusion.αs, 1)
-        fill!(ᾱₛ, 1.0f0)
-    end
-
-    α_t_s = ᾱₜ ./ ᾱₛ
-    p_t_s = 0.5f0 .* (1.0f0 .+ α_t_s)
+    α_t_s = ᾱₜ / ᾱₛ
+    p_t_s = 0.5f0 * (1.0f0 + α_t_s)
 
     # q(x_t | x_s = 1)
     term_1 = x_t .* p_t_s .+ (1.0f0 .- x_t) .* (1.0f0 .- p_t_s)
@@ -176,9 +170,10 @@ Parameters:
     - 't': the timestep
     - 'g': the graphs
 """
-function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, s::Int, g)
+function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, s::Int, g::GNNGraph)
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
-    t_batch = fill(t, batch_size) |> Flux.gpu
+    
+    t_batch = CUDA.fill(Int32(t), batch_size) # gpu!
 
     logits = model(x_t, t_batch, g)
 
@@ -205,9 +200,9 @@ Represents an inference call and produces a heatmap for the provided input
     - 'shape': shape of the graph
     - 'g': The input graph which will be predicted
 """
-function sample_heatmap(diffusion::BernoulliDiffusion, model, shape, g; inference_steps::Int=50, schedule::String="cosine")
+function sample_heatmap(diffusion::BernoulliDiffusion, model, shape::Tuple, g::GNNGraph; inference_steps::Int=50, schedule::String="cosine")
     x_cpu = Float32.(rand(Float32, shape) .> 0.5f0) 
-    x = Flux.gpu(x_cpu)
+    x = Flux.gpu(x_cpu) # only gpu!
 
     τ = get_inference_schedule(diffusion.num_timesteps, inference_steps, schedule)
 
@@ -222,7 +217,7 @@ function sample_heatmap(diffusion::BernoulliDiffusion, model, shape, g; inferenc
     x = p(diffusion, model, x, τ[1], 0, g)
 
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
-    t_batch = Flux.gpu(fill(1, batch_size))
+    t_batch = CUDA.fill(Int32(1), batch_size)
 
     logits = model(x, t_batch, g)
     return Flux.sigmoid.(logits)

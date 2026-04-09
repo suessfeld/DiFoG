@@ -1,5 +1,3 @@
-using Profile
-
 export DiffusionModel
 
 struct DiffusionModel{G<:GNN, P<:Diffusion}
