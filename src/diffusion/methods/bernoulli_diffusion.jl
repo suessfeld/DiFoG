@@ -217,7 +217,6 @@ function sample_heatmap(diffusion::BernoulliDiffusion, model, shape, g; inferenc
 
     for i in length(τ):-1:2
         x = p(diffusion, model, x, τ[i], τ[i-1], g)
-        @info "now at step $i"
     end
 
     x = p(diffusion, model, x, τ[1], 0, g)
