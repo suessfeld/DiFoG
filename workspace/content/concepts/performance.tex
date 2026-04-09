@@ -5,23 +5,25 @@ Considerations done for performance:
     \item Lazy, multithreaded I/O operations
     \item Model loaded in GPU
     \item Batches buffered and loaded just in time into GPU
+    \item Improving calculations/move them to GPU and minimize allocations
 \end{itemize}
 
-Current results:
-\begin{table}[h]
-\centering
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{lcccccc}
-\hline
-\textbf{Scenario} & \multicolumn{3}{c}{\textbf{Training}} & \multicolumn{3}{c}{\textbf{Inference}} \\
-& \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Batch (s)}\end{tabular} & \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Inst (s)}\end{tabular} & \textbf{Speedup} & \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Batch (s)}\end{tabular} & \begin{tabular}{@{}c@{}}\textbf{Time/} \\ \textbf{Inst (s)}\end{tabular} & \textbf{Speedup} \\
-\hline
-Before optimization & 0.0282 & 0.0282 & & 0.8523 & 0.8523 & \\
-\noalign{\hrule height 1.5pt}
-After optimization - batchsize 64   & 0.0328 & 0.0005 & 56.4x & 1.0608 & 0.0166 & 51.3x \\
-After optimization - batchsize 128  & 0.0601 & 0.0005 & 56.4x & 2.1070 & 0.0165 & 51.7x \\
-\hline
+Current results (AMD Ryzen 7 9700X, NVIDIA GTX 2070 super)
+\begin{table}[h!]
+\begin{tabular}{lllllllll}
+Scenario & Hidden Dim & Layers & \begin{tabular}{@{}l@{}}Training\\Batchsize\end{tabular} & \begin{tabular}{@{}l@{}}Training Time\\per instance (s)\end{tabular} & \begin{tabular}{@{}l@{}}Inference\\Batchsize\end{tabular} & \begin{tabular}{@{}l@{}}Inference Time\\per Instance (s)\end{tabular} &  &  \\ \cline{1-7}
+Before Optimization & 64  & 4  & 1   & 0.0282 & 1  & 0.8523 &  &  \\ \cline{1-7}
+Small Graphs        & 64  & 4  & 64  & 0.0005 & 1  & 0.0166 &  &  \\
+Small Graphs        & 64  & 4  & 128 & 0.0005 & 1  & 0.0165 &  &  \\ \cline{1-7}
+ER\_300\_400        & 128 & 6  & 32  & 0.0800 & 4  & 0.1241 &  &  \\ \cline{1-7}
+ER\_700\_800        & 128 & 6  & 16* & 0.1900 & 32 & 2.3589 &  &  \\
+                    &     &    &     &        & 16 & 0.7826 &  &  \\
+                    &     &    &     &        & 8  & 0.3477 &  &  \\
+                    &     &    &     &        & 4  & 0.3761 &  &  \\ \cline{1-7}
+ER\_700\_800        & 256 & 12 & 4* & 0.8053 & 4  & 7.0717 &  &  \\
+                    &     &    &     &        & 2  & 1.5396 &  &  \\
+                    &     &    &     &        & 1  & 1.5796 &  &  \\
+                    &     &    &     &        &    &        &  & 
 \end{tabular}
-\caption{Average Performance Logs and Speedup (Baseline: Before optimization - batchsize 64)}
-\label{tab:performance_logs}
 \end{table}
+
