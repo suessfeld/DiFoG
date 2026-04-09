@@ -135,11 +135,17 @@ Parameters:
     - 't': the timestep
 """
 function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int, s::Int)
-    ᾱₜ = diffusion.αs[t] # important to do like that to avoid memory allocation and use broadcasting efficiently
-    ᾱₛ = s > 0 ? diffusion.αs[s] : 1.0f0
+  ᾱₜ = diffusion.αs[t:t]
 
-    α_t_s = ᾱₜ / ᾱₛ
-    p_t_s = 0.5f0 * (1.0f0 + α_t_s)
+    if s > 0
+        ᾱₛ = diffusion.αs[s:s]
+    else
+        ᾱₛ = similar(diffusion.αs, 1)
+        fill!(ᾱₛ, 1.0f0)
+    end
+
+    α_t_s = ᾱₜ ./ ᾱₛ
+    p_t_s = 0.5f0 .* (1.0f0 .+ α_t_s)
 
     # q(x_t | x_s = 1)
     term_1 = x_t .* p_t_s .+ (1.0f0 .- x_t) .* (1.0f0 .- p_t_s)
