@@ -44,7 +44,7 @@ function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer
     x_dim    = size(x_t, 1)
     time_dim = model.gnn.config.in_dim - x_dim
 
-    t_emb = Thesis.get_timestep_embedding(t, time_dim)
+    t_emb = get_timestep_embedding(t, time_dim)
     t_emb_nodes = _embed_timesteps(t_emb, g.graph_indicator, x_t)
     x_input = vcat(t_emb_nodes, x_t)
     result = model.gnn(g, x_input)
@@ -137,7 +137,7 @@ Parameters:
 function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray)
     x_dim = size(x_t, 1)
     time_dim = gnn.config.in_dim - x_dim
-    t_emb = Thesis.get_timestep_embedding(timesteps, time_dim)
+    t_emb = get_timestep_embedding(timesteps, time_dim)
     t_emb_nodes = isnothing(batch.graph_indicator) ?
         repeat(t_emb, 1, size(x_t, 2)) :
         t_emb[:, batch.graph_indicator]
@@ -149,4 +149,26 @@ function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractAr
         calculate_loss(method, preds, x_0)
     end
     return loss, grads
+end
+
+"""
+    get_timestep_embedding(timesteps, embedding_dim, max_period=10000)
+
+Generates sinusoidal time embeddings.
+
+Parameters:
+    -'timesteps': vector of integers (T,)
+    -'embedding_dim': output dimension (D,)
+    -'max_period': max period
+"""
+function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
+    half = div(embedding_dim, 2)
+    freqs = exp.(-log(Float32(max_period)) .* Float32.(0:half-1) ./ Float32(half)) |> Flux.gpu
+    t = Float32.(timesteps)
+    args = reshape(t, :, 1) .* reshape(freqs, 1, :)
+    emb = permutedims(hcat(cos.(args), sin.(args)))
+    if embedding_dim % 2 == 1
+        emb = vcat(emb, CUDA.zeros(Float32, 1, size(emb, 2)))
+    end
+    return emb
 end
