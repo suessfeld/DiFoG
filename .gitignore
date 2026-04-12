@@ -29,3 +29,7 @@ JuliaLocalPreferences.toml
 workspace/indent.log
 
 data
+
+src/tests/cases/cluster/*
+
+/.vscode

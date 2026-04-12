@@ -21,6 +21,6 @@ include("./utils/decoding_utils.jl")
 
 include("./diffusion/methods/bernoulli_diffusion.jl")
 include("./diffusion/methods/gaussian_diffusion.jl")
-include("./gnn/models/anisotropic_gnn.jl")
+include("./gnn/models/anisotropic_gnn_basic.jl")
 
 end
