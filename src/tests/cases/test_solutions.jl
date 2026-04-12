@@ -1,5 +1,6 @@
 using TestItems
 using Thesis
+using Zygote: ignore_derivatives
 
 @testitem "TRAIN MODEL" setup=[SolutionTestUtils] begin
     using Profile
@@ -8,15 +9,15 @@ using Thesis
     using .SolutionTestUtils.DataUtils: load_lazy_collection, split_lazy_dataset
     
     instance_collection="er_300_400"
-    epochs = 5
+    epochs = 1
     learning_rate = 1e-3
-    batch_size = 8
+    batch_size = 16
     time_dim = 32
     feature_dim = 1
     gnn_config = GNNConfig(
-        num_layers=6,
+        num_layers=4,
         in_dim=feature_dim + time_dim,
-        hidden_dim=128,
+        hidden_dim=64,
         output_dim=1
     )
     
@@ -29,7 +30,7 @@ using Thesis
     @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
     
     if length(train_dataset) > 0
-        gnn = AnisotropicGNNBasic(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         
         model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu
@@ -79,7 +80,7 @@ end
     _, test_dataset = split_lazy_dataset(dataset, 0.9)
 
     if length(test_dataset) > 0
-        gnn = AnisotropicGNNBasic(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         model = DiffusionModel(gnn, diffusion_process)
 

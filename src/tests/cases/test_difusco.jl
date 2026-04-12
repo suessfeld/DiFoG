@@ -30,7 +30,7 @@ using Thesis
     @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
     
     if length(train_dataset) > 0
-        gnn = AnisotropicGNN(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         
         model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu
@@ -81,7 +81,7 @@ end
     _, test_dataset = split_lazy_dataset(dataset, 0.9)
 
     if length(test_dataset) > 0
-        gnn = AnisotropicGNN(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         model = DiffusionModel(gnn, diffusion_process)
 

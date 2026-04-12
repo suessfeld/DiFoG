@@ -34,7 +34,7 @@ using Thesis
     @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
     
     if length(train_dataset) > 0
-        gnn = AnisotropicGNN(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         
         model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu
@@ -91,7 +91,7 @@ end
     @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
     
     if length(train_dataset) > 0
-        gnn = AnisotropicGNN(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         
         model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu
@@ -147,7 +147,7 @@ end
     @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
     
     if length(train_dataset) > 0
-        gnn = AnisotropicGNN(gnn_config)
+        gnn = DifuscoGNN(gnn_config)
         diffusion_process = BernoulliDiffusion(100, "cosine")
         
         model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu

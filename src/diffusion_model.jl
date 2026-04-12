@@ -1,3 +1,4 @@
+using ChainRulesCore: unthunk, AbstractThunk
 export DiffusionModel
 
 """
@@ -78,7 +79,6 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
         
         for (g_batch, names_batch) in prefetch_channel
             batch_size = length(names_batch)
-            
             batch_time = @elapsed begin
                 g_batch = g_batch |> Flux.gpu # move entire batch to gpu
                 x_start = g_batch.ndata.x 
@@ -121,6 +121,13 @@ function infer(model::DiffusionModel, batch::GNNGraph)
     return heatmap_gpu |> Flux.cpu
 end
 
+
+_mat(g::AbstractThunk)    = unthunk(g)
+_mat(g::NamedTuple)       = map(_mat, g)
+_mat(g::Tuple)            = map(_mat, g)
+_mat(g::AbstractVector)   = map(_mat, g)
+_mat(g)                   = g
+
 """
     compute_loss_and_gradients
 
@@ -148,7 +155,7 @@ function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractAr
         preds = gnn_inner(batch, x_input)
         calculate_loss(method, preds, x_0)
     end
-    return loss, grads
+    return loss, (_mat(grads[1]),)
 end
 
 """
