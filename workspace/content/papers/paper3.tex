@@ -1,0 +1,24 @@
+
+\subsection{Unsupervised Training of Diffusion Models for Feasible Solution Generation in
+Neural Combinatorial Optimization}
+\subsubsection{Abstract}
+Recent advancements in neural combinatorial optimization
+(NCO) methods have shown promising results in generating near-optimal solutions without the need for expertcrafted heuristics. However, high performance of these approaches often rely on problem-specific human-expertisebased search after generating candidate solutions, limiting
+their applicability to commonly solved CO problems such
+as Traveling Salesman Problem (TSP). In this paper, we
+present IC/DC, an unsupervised CO framework that directly
+trains a diffusion model from scratch. We train our model
+in a self-supervised way to minimize the cost of the solution
+while adhering to the problem-specific constraints. IC/DC
+is specialized in addressing CO problems involving two distinct sets of items, and it does not need problem-specific
+search processes to generate valid solutions. IC/DC employs a novel architecture capable of capturing the intricate
+relationships between items, and thereby enabling effective
+optimization in challenging CO scenarios. IC/DC achieves
+state-of-the-art performance relative to existing NCO methods on the Parallel Machine Scheduling Problem (PMSP)
+and Asymmetric Traveling Salesman Problem (ATSP).
+
+\subsubsection{Interesting Points}
+\begin{itemize}
+    \item Proposes a new sampling method that always outputs valid solutions
+    \item Answers the question of supervision with reinforcement learning
+\end{itemize}
