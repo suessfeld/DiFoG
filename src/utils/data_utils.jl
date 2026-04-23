@@ -10,6 +10,9 @@ using ..InstanceUtils: load_instance
 export load_collection, split_dataset
 export LazyGraphDataset, load_lazy_collection, split_lazy_dataset
 
+"""
+A lazy wrapper for a dataset used for training and testing. Only loads filenames and loads batches just in time for training.
+"""
 struct LazyGraphDataset
     instances_dir::String
     solutions_dir::String
@@ -30,7 +33,7 @@ Parameters:
 function normalize_graph(g::GNNGraph)
     s, t = edge_index(g)
     return GNNGraph(
-        Int32.(s), Int32.(t); # Force correct typing!
+        Int32.(s), Int32.(t);
         num_nodes = g.num_nodes,
         ndata     = g.ndata,
         edata     = g.edata,
@@ -69,8 +72,7 @@ end
 """
     Base.getindex(d::LazyGraphDataset, i::Int)
 
-Returns a batch of graphs from a LazyGraphDataset with a given vector of indices. 
-Runs multithreaded to speed up batch-wise IO operations
+Returns a graph of a LazyGraphDataset with a given index.
 
 Parameters:
     -'dataset': the dataset holding all graphs
@@ -110,7 +112,7 @@ function load_lazy_collection(instance_collection::String)
     files = sort(readdir(instances_dir))
     valid_files = String[]
     for file in files
-        if endswith(file, ".txt")
+        if endswith(file, ".txt") && file != "_test_split.txt"
             sol_path = joinpath(solutions_dir, replace(file, ".txt" => "_solution.txt"))
             if isfile(sol_path)
                 push!(valid_files, file)
@@ -124,20 +126,46 @@ end
 """
     split_lazy_dataset(dataset::LazyGraphDataset, train_ratio::Float64=0.9)
 
-Splits a LazyGraphDataset into a training and test set and returns both.
+Splits a LazyGraphDataset into a training and test set and returns both. If a file
+_test_split.txt is found in the instance directory, this file will be used as the split definition.
 
 Parameters:
     -'dataset': the dataset which will be split
     -'train_ratio': the ratio of the training dataset. The rest will be testdata.
 """
 function split_lazy_dataset(dataset::LazyGraphDataset, train_ratio::Float64=0.9)
-    total = length(dataset)
-    shuffled_files = shuffle(dataset.files)
+    split_file = joinpath(dataset.instances_dir, "_test_split.txt")
     
-    train_size = max(1, round(Int, train_ratio * total))
-    
-    train_files = shuffled_files[1:train_size]
-    test_files = shuffled_files[train_size+1:end]
+    if isfile(split_file)
+        @info "Existing dataset split found!"
+        test_files_set = Set(readlines(split_file))
+        
+        train_files = String[]
+        test_files = String[]
+        
+        for file in dataset.files
+            if file in test_files_set
+                push!(test_files, file)
+            else
+                push!(train_files, file)
+            end
+        end
+    else
+        @info "No existing dataset split found; creating a new split file!"
+        total = length(dataset)
+        shuffled_files = shuffle(dataset.files)
+        
+        train_size = max(1, round(Int, train_ratio * total))
+        
+        train_files = shuffled_files[1:train_size]
+        test_files = shuffled_files[train_size+1:end]
+        
+        open(split_file, "w") do io
+            for file in test_files
+                println(io, file)
+            end
+        end
+    end
     
     train_dataset = LazyGraphDataset(dataset.instances_dir, dataset.solutions_dir, train_files)
     test_dataset = LazyGraphDataset(dataset.instances_dir, dataset.solutions_dir, test_files)

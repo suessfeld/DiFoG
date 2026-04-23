@@ -14,3 +14,24 @@ Discrete Diffusion was found to be better in DIFUSCO.
 \textbf{Linear and Cosine Scheduling}
 Cosine Scheduling was found to be better in DIFUSCO.
 \todo{Add description}
+
+\subsubsection{Results}
+The following experiments were done with the following configuration:
+\begin{itemize}
+    \item Layers: 6
+    \item Hidden Dim: 128
+    \item Training instances: 9000
+    \item Epochs: 5
+    \item Training Batchsize: 32
+    \item Instances: Erdős-Rényi graphs with 300-400 nodes and p=0.15, both for training and testing
+\end{itemize}
+
+\textbf{Hamming Distance}
+The hamming distance between 50 different inferences on the same input graph were
+Pairwise Hamming Distances (Using Fixed Predictions, Not Heatmaps):
+      Average: 47.62 nodes
+      Min:     17 nodes
+      Max:     58 nodes
+      Std Dev: 4.49 nodes
+
+Which means: Out of 50 inferences the resulting solutions were quite different and no 2 solutions were the same.

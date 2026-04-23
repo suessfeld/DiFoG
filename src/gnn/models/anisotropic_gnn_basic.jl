@@ -5,27 +5,27 @@ using Zygote: ignore_derivatives
 using Logging
 using GraphNeuralNetworks
 
-export AnisotropicGNN
+export AnisotropicGNNBasic
 
 """
 Implementation of the anisotropic GNN proposed by Bresson and Laurent (2018).
 """
-struct AnisotropicGNN <: GNN
+struct AnisotropicGNNBasic <: GNN
     config::GNNConfig
     layers::GNNChain
 end
 
-Flux.@layer AnisotropicGNN
+Flux.@layer AnisotropicGNNBasic
 
 """
-    AnisotropicGNN(config::GNNConfig)
+    AnisotropicGNNBasic(config::GNNConfig)
 
-Constructor for AnisotropicGNN.
+Constructor for a basic (firs version) AnisotropicGNN.
 
 Parameters:
     - 'config' : GNNConfig 
 """
-function AnisotropicGNN(config::GNNConfig)
+function AnisotropicGNNBasic(config::GNNConfig)
     if config.num_layers == 1
         chain = GNNChain(ResGatedGraphConv(config.in_dim => config.output_dim, relu))
     else
@@ -40,9 +40,9 @@ function AnisotropicGNN(config::GNNConfig)
         chain = GNNChain(Tuple(layers)...)
     end
     
-    return AnisotropicGNN(config, chain)
+    return AnisotropicGNNBasic(config, chain)
 end
 
-function (model::AnisotropicGNN)(g::GNNGraph, x::AbstractMatrix)
+function (model::AnisotropicGNNBasic)(g::GNNGraph, x::AbstractMatrix)
     return model.layers(g, x) 
 end

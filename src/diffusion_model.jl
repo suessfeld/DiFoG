@@ -1,7 +1,9 @@
-using Profile
-
+using ChainRulesCore: unthunk, AbstractThunk
 export DiffusionModel
 
+"""
+Represents a Diffusionmodel consisting of a general GNN and a diffusion method. 
+"""
 struct DiffusionModel{G<:GNN, P<:Diffusion}
     gnn::G
     method::P
@@ -33,7 +35,7 @@ _embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
 """
     (model::DiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
 
-Defines a forward pass (callable for Flux) of the network
+Defines a forward pass (callable for Flux) of the network.
 
 Parameters:
     -'x_t': current state of the solution
@@ -43,7 +45,7 @@ function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer
     x_dim    = size(x_t, 1)
     time_dim = model.gnn.config.in_dim - x_dim
 
-    t_emb = Thesis.get_timestep_embedding(t, time_dim)
+    t_emb = get_timestep_embedding(t, time_dim)
     t_emb_nodes = _embed_timesteps(t_emb, g.graph_indicator, x_t)
     x_input = vcat(t_emb_nodes, x_t)
     result = model.gnn(g, x_input)
@@ -53,7 +55,7 @@ end
 """
     train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
 
-Main training loop of a diffusion model.
+Main training loop for the diffusion model.
 
 Parameters:
     -'model': the model to train
@@ -77,7 +79,6 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
         
         for (g_batch, names_batch) in prefetch_channel
             batch_size = length(names_batch)
-            
             batch_time = @elapsed begin
                 g_batch = g_batch |> Flux.gpu # move entire batch to gpu
                 x_start = g_batch.ndata.x 
@@ -120,6 +121,13 @@ function infer(model::DiffusionModel, batch::GNNGraph)
     return heatmap_gpu |> Flux.cpu
 end
 
+
+_mat(g::AbstractThunk)    = unthunk(g)
+_mat(g::NamedTuple)       = map(_mat, g)
+_mat(g::Tuple)            = map(_mat, g)
+_mat(g::AbstractVector)   = map(_mat, g)
+_mat(g)                   = g
+
 """
     compute_loss_and_gradients
 
@@ -136,7 +144,7 @@ Parameters:
 function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray)
     x_dim = size(x_t, 1)
     time_dim = gnn.config.in_dim - x_dim
-    t_emb = Thesis.get_timestep_embedding(timesteps, time_dim)
+    t_emb = get_timestep_embedding(timesteps, time_dim)
     t_emb_nodes = isnothing(batch.graph_indicator) ?
         repeat(t_emb, 1, size(x_t, 2)) :
         t_emb[:, batch.graph_indicator]
@@ -145,7 +153,29 @@ function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractAr
 
     loss, grads = Flux.withgradient(gnn) do gnn_inner # IMPORTANT TO BOX LIKE THIS FOR ZYGOTE! Otherwise each training call the gradient will be recalculated!
         preds = gnn_inner(batch, x_input)
-        compute_loss_value(method, preds, x_0)
+        calculate_loss(method, preds, x_0)
     end
-    return loss, grads
+    return loss, (_mat(grads[1]),)
+end
+
+"""
+    get_timestep_embedding(timesteps, embedding_dim, max_period=10000)
+
+Generates sinusoidal time embeddings.
+
+Parameters:
+    -'timesteps': vector of integers (T,)
+    -'embedding_dim': output dimension (D,)
+    -'max_period': max period
+"""
+function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
+    half = div(embedding_dim, 2)
+    freqs = exp.(-log(Float32(max_period)) .* Float32.(0:half-1) ./ Float32(half)) |> Flux.gpu
+    t = Float32.(timesteps)
+    args = reshape(t, :, 1) .* reshape(freqs, 1, :)
+    emb = permutedims(hcat(cos.(args), sin.(args)))
+    if embedding_dim % 2 == 1
+        emb = vcat(emb, CUDA.zeros(Float32, 1, size(emb, 2)))
+    end
+    return emb
 end
