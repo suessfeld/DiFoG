@@ -13,8 +13,12 @@ struct OutputHead
 end
 Flux.@layer OutputHead
 
-OutputHead(d::Int, output_dim::Int) = OutputHead(BatchNorm(d), Dense(d, output_dim))
-(m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))
+OutputHead(d::Int, output_dim::Int) = OutputHead(
+    BatchNorm(d, track_stats=false),
+    Dense(d, output_dim)
+)
+
+(m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))  # ← was missing
 
 struct AGNNLayer
     U      :: Dense
@@ -34,8 +38,8 @@ AGNNLayer(d::Int) = AGNNLayer(
     Dense(d, d),
     Dense(d, d),
     Dense(d, d),
-    BatchNorm(d),
-    BatchNorm(d),
+    BatchNorm(d, track_stats=false),
+    BatchNorm(d, track_stats=false),
     Chain(Dense(d, d, relu), Dense(d, d)),
 )
 
@@ -54,7 +58,6 @@ function (layer::AGNNLayer)(g::GNNGraph, h::AbstractMatrix, e::AbstractMatrix)
     agg = NNlib.scatter(+, messages, t; dstsize=(size(h, 1), g.num_nodes))
 
     h_delta = relu.(layer.norm_h(Uh .+ agg))
-
     e_delta = layer.mlp_e(layer.norm_e(e_hat))
 
     return h_delta, e_delta
@@ -65,19 +68,11 @@ struct DifuscoGNN <: GNN
     feature_dim :: Int
     node_embed  :: Dense
     layers      :: Vector{AGNNLayer}
-    time_layers :: Vector{Chain} 
+    time_layers :: Vector{Chain}
     output_head :: OutputHead
 end
 Flux.@layer DifuscoGNN
 
-"""
-    AnisotropicGNN(config::GNNConfig, feature_dim::Int=1)
-
-Strict 1:1 DIFUSCO Anisotropic GNN (§3.4).
-
-Time embedding is injected into edge features per layer via a 2-layer MLPt,
-matching the paper equation: e^{l+1} = e^l + MLPe(BN(ê)) + MLPt(t).
-"""
 function DifuscoGNN(config::GNNConfig, feature_dim::Int=1)
     d        = config.hidden_dim
     time_dim = config.in_dim - feature_dim
@@ -108,7 +103,7 @@ function (model::DifuscoGNN)(g::GNNGraph, x_input::AbstractMatrix)
     end
 
     s, _ = edge_index(g)
-    t_emb_edges = t_emb[:, s]    # (time_dim, num_edges)
+    t_emb_edges = t_emb[:, s]
 
     for i in eachindex(model.layers)
         h_in, e_in = h, e

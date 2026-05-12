@@ -1,0 +1,134 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{fullpage}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{amsfonts}
+\usepackage{todonotes}
+\usepackage{parskip}
+\usepackage{hyperref}
+\usepackage{boxedminipage}
+
+\newcommand{\pbDef}[4]{%
+    \noindent
+    \begin{center}
+        \begin{boxedminipage}{0.98\columnwidth}
+            \textsc{#1}\\[5pt]
+            \begin{tabular}{l p{0.85\columnwidth}}
+                \textbf{Input:} & #2
+                \\
+                \textbf{#3:} & #4
+            \end{tabular}
+        \end{boxedminipage}
+    \end{center}
+}
+
+\begin{document}
+\begin{titlepage}
+        \centering
+        \vspace*{1cm}
+        
+        \Huge
+        \textbf{Master Thesis: Proposal}
+        
+        \vspace{0.5cm}
+        \LARGE
+        A Julia Framework for Denoising Diffusion Models for Solving Combinatorial Optimization Problems on Graphs
+        
+        \vfill
+        
+        \Large
+        \textbf{Elias Voill} \\
+        Matriculation Number: 12023149
+        
+        \vspace{1.5cm}
+        
+        \normalsize
+        \textbf{Advisor:} \\
+        Ao.Univ.Prof. Dipl.-Ing. Dr.techn. Günther Raidl
+
+        \textbf{Co-Supervising Assistants:} \\
+        Univ.Ass. Dipl.-Ing. Laurenz Tomandl \\
+        Projektass.in Dipl.-Ing. Maria Bresich
+        
+        \vfill
+        
+        \Large
+        Algorithms and Complexity Group \\
+        TU Wien
+        
+        \vfill
+        
+        \large
+        \today
+\end{titlepage}
+    
+\section{Problem Statement and Motivation} \label{sec:prob-motivation}
+
+Solving graph-based combinatorial optimization problems (COPs) efficiently is a fundamental challenge in the field of computer science. Traditionally, large instances of such problems are either solved exactly using methods like mathematical and constraint programming, or approximately using hand-crafted (meta-)heuristics. However, these approaches are typically highly problem-specific, requiring significant expert knowledge as well as extensive experimentation to achieve high-quality solutions. 
+
+Recently, deep learning models have been increasingly utilized to directly infer heuristic solutions for COPs. While these approaches cannot yet catch up with state-of-the-art combinatorial optimization techniques, they are already able to produce meaningful solutions with a minimum of hand-crafted problem-specific aspects.
+
+The first deep learning models used for solving COPs were mostly of autoregressive nature \cite{bello-16-NCO-with-RL, kool-18-tsp-attention, vinyal-15-pointer-networks}. Those techniques typically construct solutions step-by-step, predicting the next part of a solution based on the partial sequence already generated. This sequential process limits parallelization during inference, creating a performance bottleneck and causing execution times to scale poorly as the problem size increases.
+
+More recent approaches are based on diffusion models --- a relatively new class of generative models. Rather than constructing solutions part-by-part, these models learn to transform pure noise into solutions through an iterative denoising process. While the most well-known applications lie in the field of computer vision, in recent years, other use cases such as solving COPs have been explored \cite{yang-23-diffusion-applications}. A major advantage of such diffusion models over autoregressive methods is that, at each denoising step, the entire solution is refined simultaneously across all nodes and edges, rather than element-by-element. This global refinement avoids the strict sequential dependency of autoregressive construction, enabling greater parallelization within each step. To process the underlying graph structures of these problems, these models typically rely on Graph Neural Networks (GNNs) as their foundational architecture. GNNs are well-suited for COPs because their message-passing mechanisms preserve permutation invariance and natively model structural node and edge relationships \cite{cappart-21-gnns}. However, while highly effective at modeling graph structures, this architectural choice introduces a significant drawback during inference. The repeated evaluation of a computationally expensive message-passing GNN across multiple denoising steps creates a severe performance bottleneck for real-world applications.
+
+In response to these computational limitations, recent research investigates a range of advanced optimization techniques designed to accelerate the inference and training process.
+The aim of this thesis is to develop an efficient Julia framework that utilizes such state-of-the-art optimization techniques to mitigate performance bottlenecks of the baseline approach. This framework will then allow for a systematic comparison of recently proposed approaches from the literature regarding their execution speed and solution quality.
+
+Specific research questions are:
+\begin{itemize}
+    \item How can various acceleration techniques for diffusion models be integrated into an efficient, flexible Julia framework for solving different COPs on graphs with minimal problem-specific configuration?
+    \item Is it possible to combine different approaches to achieve an overall performant implementation?
+    \item How do different GNNs and GNN configurations compare regarding solution quality and execution performance?
+\end{itemize}
+
+\section{State of the Art}
+Utilizing diffusion models effectively for combinatorial optimization is an evolving research area with many different authors proposing various approaches.
+
+Sun et al. propose DIFUSCO \cite{sun-23-difusco}, a graph-based diffusion solver for combinatorial optimization. DIFUSCO is a diffusion model based on a GNN, trained in a supervised manner to generate solutions to a variety of problems using a fixed number of diffusion steps. Evaluation of the model on both the Traveling Salesman Problem (TSP) and Maximum Independent Set Problem (MISP) showed that such a diffusion approach yielded similar solution quality to state-of-the-art solvers. Despite these promising results, the model still relies on a vast number of denoising steps during inference, resulting in a severe, computationally intensive performance bottleneck.
+
+In the context of combinatorial optimization, Huang et al. propose the use of ``progressive distillation'' \cite{huang-23-progressive-distillation-co}, a technique originally proposed by Salimans and Ho \cite{salimans-22-progressive-distillation-original}. The authors iteratively reduce the required inference steps by training a ``student'' model that predicts two inference steps in just one, thus cutting the required diffusion steps in half.  
+
+DISCO, an ``Efficient Diffusion Solver For Large-Scale Combinatorial Optimization Problems''~\cite{zhao-25-disco}, tries to solve the issue of slow inference times by introducing ``residue solutions'' which are degenerate estimates that constrain the sampling space to a more meaningful domain. This speeds up inference time by drastically reducing the number of denoising steps, as the trained model only needs to refine this cheap approximation within a limited solution space.
+
+Another major improvement on DIFUSCO's framework was proposed by Li et al. \cite{li-24-fastt2t}. The proposed ``training-to-testing'' (T2T) framework optimizes the diffusion process by directly mapping from noise to solution without any intermediate steps. This approach yielded massive speedups while achieving similar solution quality.
+
+Li et al. further advance the diffusion process by introducing the concept of Flow Matching, a different approach to map an input distribution to a solution space \cite{li-26-efloco}. Originally introduced by Lipman et al. \cite{lipman-22-flow-matching}, this technique learns a direct, deterministic path from pure noise to a valid solution, avoiding the complex stepwise transitions of traditional diffusion. The framework EFLOCO, proposed by Li et al., utilizes this technique for solving COPs with an efficient adaptive inference time-step scheduler that requires minimal inference steps.
+
+\section{Expected Results}
+The expected main result of this thesis is a state-of-the-art Julia framework for diffusion models, specifically engineered for solving diverse combinatorial optimization problems. This implementation will be GPU-optimized to yield fast training times and, more importantly, to overcome current inference bottlenecks by utilizing optimization approaches from the literature discussed above. By doing so, the framework should be scalable and usable on large, complex graph structures that currently challenge existing models.
+
+Furthermore, the solution quality produced by the accelerated framework should remain competitive when compared to the state-of-the-art approaches reviewed in the literature. By evaluating the framework on standard benchmark problems such as MISP and Maximum Cut Problem, the thesis aims to demonstrate whether execution speed can be improved while maintaining comparable solution quality.
+
+
+\section{Methodology}
+The methodology for developing the described implementation is structured as follows:
+\begin{itemize}
+    \item First, a literature review is conducted, comparing different state-of-the-art approaches addressing this topic. This research process should yield a set of possible optimizations that can later be implemented and evaluated.
+    \item During the second phase, the DIFUSCO model will first be implemented as the foundational framework.
+    \item Subsequently, the selected state-of-the-art improvements will be integrated into the framework to achieve improved performance.
+    \item The implemented approaches will then be evaluated and compared on commonly used node-selection benchmark problems such as the MISP. This analysis will discuss both the runtime performance and solution quality of the resulting implementation, further comparing it with state-of-the-art approaches.
+\end{itemize}
+
+\section{Context Within the Master Program}
+The following courses are relevant for the thesis:
+\begin{itemize}
+    \item 186.814 VU Algorithmics 
+    \item 104.697 VU Discrete Mathematics
+    \item 184.702 VU Machine Learning
+    \item 188.910 PR Advanced Software Engineering
+\end{itemize}
+
+The course Machine Learning provides an understanding of fundamental machine learning concepts such as models, training and testing. A theoretical foundation, especially in the field of graph theory, is provided by Discrete Mathematics VU. Furthermore, the Algorithmics course discusses different graph problems and how they can be solved. Advanced Software Engineering, on the other hand, provides key skills to develop a clean implementation that can be used and integrated into other research projects.
+
+\newpage
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

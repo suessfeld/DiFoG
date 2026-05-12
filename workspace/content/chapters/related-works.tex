@@ -1,0 +1,91 @@
+\section{State of the Art}
+Utilizing diffusion models effectively for combinatorial optimization is an
+evolving research area with many different authors proposing various
+approaches.
+
+Sun et al. propose DIFUSCO \cite{sun-23-difusco}, a graph-based diffusion
+solver for combinatorial optimization. DIFUSCO is a diffusion model based on a
+GNN, trained in a supervised manner to generate solutions to a variety of
+problems using a fixed number of diffusion steps. Evaluation of the model on
+both the Traveling Salesman Problem (TSP) and Maximum Independent Set Problem
+(MISP) showed that such a diffusion approach yielded similar solution quality
+to state-of-the-art solvers. Despite these promising results, the model still
+relies on a vast number of denoising steps during inference, resulting in a
+severe, computationally intensive performance bottleneck.
+
+In the context of combinatorial optimization, Huang et al. propose the use of
+``progressive distillation'' \cite{huang-23-progressive-distillation-co}, a
+technique originally proposed by Salimans and Ho
+\cite{salimans-22-progressive-distillation-original}. The authors iteratively
+reduce the required inference steps by training a ``student'' model that
+predicts two inference steps in just one, thus cutting the required diffusion
+steps in half.
+
+DISCO, an ``Efficient Diffusion Solver For Large-Scale Combinatorial
+Optimization Problems''~\cite{zhao-25-disco}, tries to solve the issue of slow
+inference times by introducing ``residue solutions'' which are degenerate
+estimates that constrain the sampling space to a more meaningful domain. This
+speeds up inference time by drastically reducing the number of denoising steps,
+as the trained model only needs to refine this cheap approximation within a
+limited solution space.
+
+Another major improvement on DIFUSCO's framework was proposed by Li et al. \cite{li-24-fastt2t} with the introduction of the Fast T2T model. To address the costly iterative sampling process of standard diffusion models, Fast T2T establishes optimization consistency models that learn a direct mapping from any given noise level to the optimal solution for a specific problem instance. This is achieved through a specialized optimization consistency training protocol. Instead of learning to predict the data distribution progressively from step $t$ to step $t-1$, the model minimizes the difference among samples originating from varying generative trajectories and time steps relative to the optimal solution. Consequently, the model enables high-quality, single-step solution generation directly from random noise, while still retaining the flexibility to perform multi-step sampling---by alternating noise introduction and solution reconstruction---to trade computational time for enhanced solution quality.
+
+Furthermore, to bridge the disparity between data-driven training on historical instances and the specific requirements of solving new instances, Fast T2T incorporates a novel consistency-based gradient search scheme during the testing stage. This mechanism introduces instance-specific guidance from the optimization objective into the learned solution prior. By minimizing the free energy corresponding to the posterior distribution, the latent solution probabilities are updated via exponential gradient descent. This objective gradient guidance occurs dynamically during the alternation of noise injection and denoising steps, effectively directing the sampling process toward the optimal solution. Empirical evaluations on combinatorial tasks like the Traveling Salesman Problem (TSP) and Maximal Independent Set (MIS) demonstrate that Fast T2T, using merely a single-step initial generation and a one-step gradient search, mostly outperforms state-of-the-art diffusion-based counterparts that require hundreds of steps, achieving comparable or superior solution quality with tens of times the speedup.
+
+Li et al. further advance the diffusion process by introducing the concept of
+Flow Matching (FM), a different approach to map an input distribution to a
+solution space \cite{li-26-efloco}. Originally introduced by Lipman et al.
+\cite{lipman-22-flow-matching}, FM learns a deterministic velocity field that
+guides samples along smooth, direct paths from a source distribution to a
+target distribution, avoiding the stochastic and irregular sampling
+trajectories characteristic of traditional diffusion models. While FM has
+demonstrated strong results in continuous domains such as computer vision, its
+direct application to COPs presents unique challenges: due to the discrete and
+globally coupled nature of solution spaces, even minor perturbations in
+intermediate heatmap representations can cause significant deviations in the
+final decoded solution.
+
+The framework EFLOCO, proposed by Li et al., addresses these challenges through
+four key components. First, a probability path is constructed that interpolates
+between a source distribution --- a random binary matrix representing
+unstructured connections --- and a target distribution centered on a valid
+solution, using the uniform-state formulation of discrete FM
+\cite{shaul-25-discrete-fm}.
+
+\question{Only discrete domain, what about continuous domain? However Gaussian noise was the worse approach for DIFUSCO}
+
+Second, a probabilistic velocity field $u_t$ is learned that governs how each solution component evolves along this path. Crucially, the velocity is derived analytically from the model's direct
+prediction of the final solution distribution $p_{1|t}(x_i \mid x_t)$, allowing
+the model to bypass intermediate denoising steps and instead predict the target
+in a single directed movement. Third, a discrete flow matching loss based on
+forward KL divergence aligns the predicted velocity field with the ground-truth
+trajectory derived from the constructed probability path.
+
+Fourth, to mitigate the instability caused by trajectory incoherence in
+few-step inference, EFLOCO introduces a velocity-based consistency loss
+$\mathcal{L}_\text{cons}$. This loss penalizes divergence between the
+model-induced transition distributions $\pi_t$ and $\pi_{t+\Delta}$ at adjacent
+time steps, enforcing that the predicted direction of evolution remains smooth
+along the trajectory. This regularization proves especially critical in the
+low-step regime: ablation studies show that in two-step inference, the
+consistency loss nearly halves the optimality gap on TSP-100, from $0.19\%$ to
+$0.07\%$.
+
+Beyond the model itself, EFLOCO introduces an Adaptive Time-Step Scheduling
+Strategy (ATSS) that replaces standard linear or cosine schedules with a
+data-driven, non-uniform discretization of the flow trajectory. By estimating
+local transition magnitudes along the path and concentrating time steps in
+high-variation regions, ATSS allocates computational effort where it is most
+needed, improving both convergence and inference quality under tight step
+budgets. Notably, ATSS is shown to generalize beyond EFLOCO: when applied
+retroactively to DIFUSCO, it consistently outperforms standard schedulers
+across all tested configurations, suggesting it is a broadly applicable
+acceleration technique. In experiments on TSP and ATSP, EFLOCO with ATSS
+achieves comparable or superior solution quality to DIFUSCO and T2TCO using
+only two inference steps, yielding orders-of-magnitude faster runtimes.
+
+\question{What are alternatives to this ATSS approach? Sun \cite{sun-26-curriculum-sampling} came to the conclusion that logit-normal undersamples the boundary regimes (t~0, t~1). Best result yielded a two-phase approach that uses logit-normal for about 60\% of epochs and uniform for 40\%. Hang et al. also propose to use the Laplace distribution \cite{hang-24-improved-noise-scheduling} in the diffusion context. Generally all approaches agree, that the 'middle' part is the most important. Maybe it does not need something as computationally expensive as the ATSS approach and a static scheduler is sufficient?}
+\question{The EFLOCO paper generally uses an discrete update rule (similar to Euler, thus one jump in one direction). When done in a continuous domain it might be interesting to look at some higher-order approaches (packages DP5, Tsit5?) that could improve this approaches. However, here also the question of computation effort comes into play.}
+\question{If the FM formulation is taken into a continuous domain: Can rectified Flow (Reflow) techniques be applied as an improvement method?}
+\question{Maybe it would be interesting to somehow explore the concept of the DISCO paper within the FM context: Instead of starting from a pure noise distribution, a cheap solution (+ some noise) could be seen as a starting point, potentially improving solution quality. Then maybe it is even enough to not take the entire solution path (from pure noise t=1.0 to 0.0), but rather start at e.g. t=0.5, because the first half is 'cheaply' simulated? Isaac et al. discuss the usage of this approach within Flow Matching in the context of image generation \cite{issachar-25-conditional-prior-distribution-for-fm}. They replaced the standard starting point of pure noise with a computationally "cheap" approximation of the target image (the conditional prior), which serves as a massive shortcut that significantly reduces the number of steps required to compute the final image. }
