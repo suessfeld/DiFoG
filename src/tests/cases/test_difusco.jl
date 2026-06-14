@@ -5,10 +5,8 @@ using Thesis
     using Profile
     using Thesis
     using Flux
-    using .DIFUSCOTestSetup.DataUtils: load_lazy_collection, split_lazy_dataset
     
     # DIFUSCO CONFIG
-    instance_collection="difusco_instances"
     epochs = 5 # paper = 50
     learning_rate = 1e-3
     batch_size = 16 # paper = 32
@@ -21,13 +19,11 @@ using Thesis
         output_dim=1
     )
     
-    dataset, _ = load_lazy_collection(instance_collection)
+    generator = ERGraphGenerator(min_nodes=50, max_nodes=100, p=0.15)
+    solver = MISPSolver(time_limit=0.1)
+    train_dataset = RuntimeDataset(1000, generator, solver) 
     
-    total_instances = length(dataset)
-    @info "LazyLoaded $total_instances instance paths total."
-    
-    train_dataset, test_dataset = split_lazy_dataset(dataset, 0.9)
-    @info "Split: $(length(train_dataset)) for training, $(length(test_dataset)) for testing."
+    @info "Runtime dataset initialized"
     
     if length(train_dataset) > 0
         gnn = DifuscoGNN(gnn_config)
@@ -44,9 +40,6 @@ using Thesis
         ) 
         
         train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=true, collate=true)
-        batch_types = [typeof(first(b)) for b in Iterators.take(train_loader, 5)]
-        @assert allequal(batch_types) "Graph types still vary — normalization incomplete"
-
         loss_history = Thesis.train_diffusion_model!(model, optim, train_loader, epochs=epochs)
                 
         # save model
@@ -62,11 +55,9 @@ end
     using Profile
     using Thesis
     using Flux
-    using .DIFUSCOTestSetup.DataUtils: load_lazy_collection, split_lazy_dataset
     using .DIFUSCOTestSetup.TestUtils: run_inference_and_save
 
     # same config as before! Note that THIS has to be the same as for the training!
-    instance_collection="difusco_instances_small"
     time_dim = 32
     feature_dim = 1
     gnn_config = GNNConfig(
@@ -76,9 +67,15 @@ end
         output_dim=1
     )
 
-    dataset, inferences_dir = load_lazy_collection(instance_collection)
+    # Setup Runtime Dataset for Testing
+    config = (min_nodes=50, max_nodes=100, er_p=0.15)
+    generator = ERGraphGenerator()
+    solver = MISPSolver()
     
-    _, test_dataset = split_lazy_dataset(dataset, 0.9)
+    test_dataset = RuntimeDataset(100, generator, solver, config)
+    
+    inferences_dir = joinpath(pkgdir(Thesis), "test_inferences", "difusco_instances_small")
+    mkpath(inferences_dir)
 
     if length(test_dataset) > 0
         gnn = DifuscoGNN(gnn_config)
@@ -115,11 +112,7 @@ end
         @warn "No .env file found at $env_path"
     end
 
-    include(joinpath(pkgdir(Thesis), "src", "tests", "utils", "instance_utils.jl"))
-    include(joinpath(pkgdir(Thesis), "src", "utils", "data_utils.jl"))
-    include(joinpath(pkgdir(Thesis), "src", "tests", "utils", "test_utils.jl"))
+    include(joinpath(pkgdir(Thesis), "src", "tests", "test_utils.jl"))
     
-    using .InstanceUtils
-    using .DataUtils
     using .TestUtils
 end

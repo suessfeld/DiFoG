@@ -24,4 +24,13 @@ include("./diffusion/methods/gaussian_diffusion.jl")
 include("./gnn/models/anisotropic_gnn_basic.jl")
 include("./gnn/models/difusco_gnn.jl")
 
+include("./utils/data/data_utils.jl")
+include("./utils/data/runtime_dataset.jl")
+
+include("./utils/data/graphs/er.jl")
+include("./utils/data/graphs/basic.jl")
+
+include("./utils/data/problems/misp.jl")
+include("./utils/data/problems/maxdeg.jl")
+
 end
