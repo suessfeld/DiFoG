@@ -28,7 +28,7 @@ LocalPreferences.toml
 JuliaLocalPreferences.toml
 workspace/indent.log
 
-data
+/data
 
 src/tests/cases/cluster/*
 
