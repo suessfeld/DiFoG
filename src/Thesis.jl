@@ -6,7 +6,7 @@ using GraphNeuralNetworks
 using Statistics
 using DotEnv
 
-DotEnv.load!()
+DotEnv.load!(joinpath(@__DIR__, ".env"))
 
 include("./diffusion/diffusion.jl")
 include("./gnn/gnn.jl")
@@ -32,5 +32,11 @@ include("./utils/data/graphs/basic.jl")
 
 include("./utils/data/problems/misp.jl")
 include("./utils/data/problems/maxdeg.jl")
+
+function __init__()
+    DotEnv.load!(joinpath(@__DIR__, ".env"))
+    _init_gurobi_env!()
+    return
+end
 
 end
