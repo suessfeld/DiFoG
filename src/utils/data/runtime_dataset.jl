@@ -26,7 +26,7 @@ blocks on a fresh Gurobi solve as long as production keeps up with consumption.
 """
 function RuntimeDataset(num_instances::Int, generator::G, solver::P;
                          max_concurrent_solves::Int=2,
-                         buffer_capacity::Int=4 * max_concurrent_solves) where {G<:GraphGenerator, P<:ProblemSolver}
+                         buffer_capacity::Int=3 * max_concurrent_solves) where {G<:GraphGenerator, P<:ProblemSolver}
     buffer = Channel{Tuple{GNNGraph,String}}(buffer_capacity)
 
     for _ in 1:max_concurrent_solves

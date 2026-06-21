@@ -85,7 +85,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
             
             # If the wait time is longer than 50ms, log a starvation warning
             if wait_time > 0.05
-                @warn "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
+                @debug "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
             end
             
             batch_size = length(names_batch)
@@ -105,6 +105,8 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
 
             epoch_loss += loss
             num_batches += 1
+
+            t_start_wait = time()
         end
         
         avg_loss = epoch_loss / max(1, num_batches)
