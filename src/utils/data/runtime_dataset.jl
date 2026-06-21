@@ -1,6 +1,7 @@
 using Flux
 using GraphNeuralNetworks
 using Graphs
+using .DataUtils: normalize_graph
 
 export RuntimeDataset, GraphGenerator, ProblemSolver
 
@@ -16,26 +17,17 @@ end
 Base.length(d::RuntimeDataset) = d.num_instances
 
 function Base.getindex(dataset::RuntimeDataset, i::Int)
-    # 1. Generate Graph Topology (Generator uses its own internal params)
-    @info "generate"
+    # 1. Generate Graph Topology
     g = dataset.generator()
     
-    @info "solve"
-    # 2. Solve the Problem (Solver uses its own internal params, if any)
+    # 2. Solve the Problem
     x_0 = dataset.solver(g)
     
-    # 3. Extract edge indices for GNNGraph (Bidirectional mapping)
-    s = Int32[]
-    t = Int32[]
-    for edge in edges(g)
-        push!(s, Int32(src(edge)))
-        push!(t, Int32(dst(edge)))
-        push!(s, Int32(dst(edge)))
-        push!(t, Int32(src(edge)))
-    end
+    # 3. Build the GNNGraph EXACTLY like the old LazyGraphDataset did
+    gnn_g = GNNGraph(g, ndata=(; x=x_0))
     
-    gnn_g = GNNGraph(s, t; num_nodes = nv(g), ndata=(; x=x_0))
-    return (gnn_g, "runtime_inst_$i.txt") 
+    # 4. Normalize to enforce Int32 edge indices for GPU safety
+    return (normalize_graph(gnn_g), "runtime_inst_$i.txt") 
 end
 
 function Base.getindex(dataset::RuntimeDataset, inds::AbstractVector{<:Integer})
