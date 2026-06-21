@@ -76,8 +76,18 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
                 put!(ch, batch)
             end
         end
+
+        t_start_wait = time()
         
         for (g_batch, names_batch) in prefetch_channel
+
+            wait_time = time() - t_start_wait
+            
+            # If the wait time is longer than 50ms, log a starvation warning
+            if wait_time > 0.05
+                @warn "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
+            end
+            
             batch_size = length(names_batch)
             batch_time = @elapsed begin
                 g_batch = g_batch |> Flux.gpu # move entire batch to gpu

@@ -1,3 +1,5 @@
+# src/tests/cases/test_difusco.jl
+
 using TestItems
 using Thesis
 
@@ -6,22 +8,23 @@ using Thesis
     using Thesis
     using Flux
     
-    # DIFUSCO CONFIG
-    epochs = 5 # paper = 50
+    # DIFUSCO CONFIG (Matched 1:1 with run_pipeline.jl)
+    epochs = 5
     learning_rate = 1e-3
-    batch_size = 16 # paper = 32
+    batch_size = 32
     time_dim = 32
     feature_dim = 1
     gnn_config = GNNConfig(
-        num_layers=6, # paper = 12
-        in_dim=feature_dim + time_dim,
-        hidden_dim=128, # paper = 256
+        num_layers=3,
+        in_dim=feature_dim + time_dim, # 33
+        hidden_dim=32,
         output_dim=1
     )
+    num_workers = 8
     
     generator = ERGraphGenerator(min_nodes=50, max_nodes=100, p=0.15)
-    solver = MISPSolver(time_limit=0.1)
-    train_dataset = RuntimeDataset(1000, generator, solver) 
+    solver = MISPSolver(time_limit=0.3)
+    train_dataset = RuntimeDataset(1000, generator, solver; max_concurrent_solves=num_workers, buffer_capacity=batch_size * 3) 
     
     @info "Runtime dataset initialized"
     
@@ -55,24 +58,24 @@ end
     using Profile
     using Thesis
     using Flux
-    using .DIFUSCOTestSetup.TestUtils: run_inference_and_save
+    # FIX 1: Import directly from DIFUSCOTestSetup since there is no TestUtils module anymore
+    using .DIFUSCOTestSetup: run_inference_and_save
 
-    # same config as before! Note that THIS has to be the same as for the training!
+    # CONFIG (Matched 1:1 with run_pipeline.jl)
     time_dim = 32
     feature_dim = 1
     gnn_config = GNNConfig(
-        num_layers=12,
-        in_dim=feature_dim + time_dim,
-        hidden_dim=256,
+        num_layers=6,
+        in_dim=feature_dim + time_dim, # 33
+        hidden_dim=128,
         output_dim=1
     )
 
-    # Setup Runtime Dataset for Testing
-    config = (min_nodes=50, max_nodes=100, er_p=0.15)
-    generator = ERGraphGenerator()
-    solver = MISPSolver()
+    generator = ERGraphGenerator(min_nodes=200, max_nodes=300, p=0.15)
+    solver = MISPSolver(time_limit=3.0)
     
-    test_dataset = RuntimeDataset(100, generator, solver, config)
+    # 100 instances for testing
+    test_dataset = RuntimeDataset(100, generator, solver)
     
     inferences_dir = joinpath(pkgdir(Thesis), "test_inferences", "difusco_instances_small")
     mkpath(inferences_dir)
@@ -89,7 +92,7 @@ end
         model = model |> Flux.gpu
 
         @info "Running Inference and saving results..." 
-        run_inference_and_save(model, test_dataset, inferences_dir, 4)
+        run_inference_and_save(model, test_dataset, inferences_dir, 32)
         @info "Inferences successfully saved to: $inferences_dir"
     end
 end
@@ -114,5 +117,5 @@ end
 
     include(joinpath(pkgdir(Thesis), "src", "tests", "test_utils.jl"))
     
-    using .TestUtils
+    # FIX 2: Removed `using .TestUtils` entirely
 end

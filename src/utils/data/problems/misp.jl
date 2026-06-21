@@ -21,9 +21,10 @@ MISPSolver(; time_limit::Float64=0.5) = MISPSolver(time_limit)
 
 function (solver::MISPSolver)(g::AbstractGraph)
     n = nv(g)
-    model = Model(() -> Gurobi.Optimizer(GRB_ENV_REF[]))   # <- was GRB_ENV
+    model = Model(() -> Gurobi.Optimizer(GRB_ENV_REF[]))
     set_silent(model)
     set_optimizer_attribute(model, "TimeLimit", solver.time_limit)
+    set_optimizer_attribute(model, "Threads", 1)
 
     @variable(model, x[1:n], Bin)
     for e in edges(g)

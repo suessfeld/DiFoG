@@ -140,13 +140,15 @@ function run_automated_pipeline(;
     batch_size::Int = 16,
     learning_rate::Float64 = 1e-3,
     diffusion_steps::Int = 100,
-    inference_steps::Int = 20 
+    inference_steps::Int = 20, 
+    workers::Int = 8
 )
     @info "=== Starting Pipeline Run: $run_id ==="
 
     @info "Initializing Train and Test datasets..."
-    train_dataset = RuntimeDataset(num_train, generator, solver)
-    test_dataset = RuntimeDataset(num_test, generator, solver)
+    
+    train_dataset = RuntimeDataset(num_train, generator, solver; max_concurrent_solves=workers, buffer_capacity=batch_size * 3)
+    test_dataset = RuntimeDataset(num_test, generator, solver; max_concurrent_solves=workers, buffer_capacity=batch_size * 3)
 
     # Train uses collate=true for maximum GPU speed
     train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=true, collate=true)
