@@ -2,11 +2,11 @@ using ChainRulesCore: unthunk, AbstractThunk
 export DiffusionModel
 
 """
-Represents a Diffusionmodel consisting of a general GNN and a diffusion method. 
+Represents a Diffusionmodel consisting of a general, a diffusion method and a scheduler. 
 """
-struct DiffusionModel{G<:GNN, P<:Diffusion}
+struct DiffusionModel{G<:GNN, M<:Diffusion}
     gnn::G
-    method::P
+    method::M
 end
 
 Flux.@layer DiffusionModel

@@ -33,11 +33,19 @@ function RuntimeDataset(num_instances::Int, generator::G, solver::P;
         Threads.@spawn begin
             n = 0
             while true
-                g = generator()
-                x_0 = solver(g)
-                gnn_g = GNNGraph(g, ndata=(; x=x_0))
-                put!(buffer, (normalize_graph(gnn_g), "runtime_inst_$(n).txt"))  # blocks here if buffer is full — natural backpressure
-                n += 1
+                try
+                    g = generator()
+                    x_0 = solver(g)
+                    gnn_g = GNNGraph(g, ndata=(; x=x_0))
+                    
+                    # Blocks here if buffer is full — natural backpressure
+                    put!(buffer, (normalize_graph(gnn_g), "runtime_inst_$(n).txt"))
+                    n += 1
+                catch e
+                    # Ensures the background task doesn't die silently!
+                    @error "Background dataset worker crashed! Logging and resuming..." exception=(e, catch_backtrace())
+                    sleep(1) # Prevent a tight infinite loop if the error is permanent
+                end
             end
         end
     end

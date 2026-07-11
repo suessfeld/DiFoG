@@ -35,3 +35,5 @@ src/tests/cases/cluster/*
 /.vscode
 gurobi.lic
 models/
+results/
+src/tests/pipelines

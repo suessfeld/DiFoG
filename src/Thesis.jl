@@ -9,6 +9,7 @@ using DotEnv
 DotEnv.load!(joinpath(@__DIR__, ".env"))
 
 include("./diffusion/diffusion.jl")
+include("./diffusion/scheduler.jl")
 include("./gnn/gnn.jl")
 
 include("./gnn/gnn_config.jl") 
@@ -19,8 +20,14 @@ include("diffusion_model.jl")
 include("./utils/model_utils.jl")
 include("./utils/decoding_utils.jl")
 
-include("./diffusion/methods/bernoulli_diffusion.jl")
-include("./diffusion/methods/gaussian_diffusion.jl")
+include("./diffusion/methods/diffusion/bernoulli_diffusion.jl")
+include("./diffusion/methods/diffusion/gaussian_diffusion.jl")
+include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
+
+include("./diffusion/scheduler/linear.jl")
+include("./diffusion/scheduler/cosine.jl")
+include("./diffusion/scheduler/atss.jl")
+
 include("./gnn/models/anisotropic_gnn_basic.jl")
 include("./gnn/models/difusco_gnn.jl")
 

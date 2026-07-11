@@ -22,7 +22,7 @@ struct GaussianDiffusion <: Diffusion
     sqrt_αs_cumprod::AbstractVector{Float32}
     sqrt_one_minus_αs_cumprod::AbstractVector{Float32}
 
-    function GaussianDiffusion(num_timesteps::Int=1000, schedule::String="linear")
+    function GaussianDiffusion(scheduler::Scheduler)
         if schedule == "linear"
             scale = 1000 / num_timesteps
             beta_start = scale * 1e-4

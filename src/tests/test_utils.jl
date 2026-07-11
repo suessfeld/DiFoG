@@ -1,5 +1,3 @@
-# src/tests/utils/test_utils.jl
-
 using Flux
 using GraphNeuralNetworks
 using Printf
@@ -7,15 +5,10 @@ using Dates
 using Statistics
 using Base.Iterators: partition
 
-# Note: No 'module TestUtils' or 'export' needed anymore!
-
-"""
-    run_inference_and_save(model, test_pairs, inferences_dir)
-"""
 function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_dir, batch_size=128)
     total_instances = length(test_pairs)
 
-    @sync begin # for parallelism
+    @sync begin
         for i in 1:batch_size:total_instances
             end_idx = min(i + batch_size - 1, total_instances)
 
@@ -24,7 +17,6 @@ function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_di
             filenames = [item[2] for item in batch]
             node_counts = [g.num_nodes for g in graphs]
 
-            # batch and infer
             batch_time = @elapsed begin
                 heatmaps = Thesis.infer(model, Flux.batch(graphs))
             end
@@ -35,7 +27,6 @@ function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_di
 
             @info "Batch $batch_num [$(end_idx) instances total] | Total: $(round(batch_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
 
-            # write in parallel
             Threads.@spawn begin
                 start_slice = 1
                 for j in 1:length(graphs)
@@ -65,13 +56,10 @@ function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_di
     end
 end
 
-"""
-    run_inference_greedy_and_save
-"""
 function run_inference_greedy_and_save(model::DiffusionModel, test_pairs, inferences_dir, batch_size=128)
     total_instances = length(test_pairs)
 
-    @sync begin # for parallelism
+    @sync begin
         for i in 1:batch_size:total_instances
             end_idx = min(i + batch_size - 1, total_instances)
 
@@ -80,7 +68,6 @@ function run_inference_greedy_and_save(model::DiffusionModel, test_pairs, infere
             filenames = [item[2] for item in batch]
             node_counts = [g.num_nodes for g in graphs]
 
-            # batch and infer
             batch_time = @elapsed begin
                 heatmaps = Thesis.infer(model, Flux.batch(graphs))
             end
@@ -126,145 +113,152 @@ function run_inference_greedy_and_save(model::DiffusionModel, test_pairs, infere
     end
 end
 
-"""
-    run_automated_pipeline(...)
-"""
 function run_automated_pipeline(;
     run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),
+    model::DiffusionModel,
     generator::GraphGenerator,
     solver::ProblemSolver,
-    gnn_config::GNNConfig,
     num_train::Int = 1000,
     num_test::Int = 100,
     epochs::Int = 5,
     batch_size::Int = 16,
     learning_rate::Float64 = 1e-3,
-    diffusion_steps::Int = 100,
-    inference_steps::Int = 20, 
-    workers::Int = 12
+    workers::Int = 12,
+    test_time_limit::Float64 = 2.0
 )
     @info "=== Starting Pipeline Run: $run_id ==="
 
-    @info "Initializing Train and Test datasets..."
-    
-    train_dataset = RuntimeDataset(num_train, generator, solver; max_concurrent_solves=workers)
-    test_dataset = RuntimeDataset(num_test, generator, solver; max_concurrent_solves=workers)
+    models_dir = joinpath(pkgdir(Thesis), "models")
+    mkpath(models_dir)
+    model_path = joinpath(models_dir, "model-$run_id.jld2")
 
-    # Train uses collate=true for maximum GPU speed
-    train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=true, collate=true)
-    
-    # Test uses collate=false so we can easily access individual generated CPU graphs for saving!
-    test_loader = Flux.DataLoader(test_dataset, batchsize=batch_size, shuffle=false, collate=false)
+    model_already_exists = isfile(model_path)
 
-    gnn = DifuscoGNN(gnn_config)
-    diffusion_process = BernoulliDiffusion(diffusion_steps, "cosine")
-    model = DiffusionModel(gnn, diffusion_process) |> Flux.gpu
+    # Use a longer Gurobi budget for test instances only, so evaluation targets
+    # are as close to optimal as practical, even if training used a tight limit.
+    test_solver = solver isa MISPSolver ? MISPSolver(time_limit=test_time_limit) : solver
+
+    final_train_loss = NaN
+
+    if model_already_exists
+        @info "Found existing model for run_id '$run_id' at $model_path — loading weights and skipping training."
+        Thesis.load_model!(model, model_path)
+    else
+        @info "No existing model found for run_id '$run_id' — training from scratch."
+
+        @info "Initializing Train dataset..."
+        train_dataset = RuntimeDataset(num_train, generator, solver; max_concurrent_solves=workers)
+        train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=true, collate=true)
+
+        optim = Flux.setup(
+            Flux.Optimisers.OptimiserChain(
+                Flux.Optimisers.ClipGrad(1.0f0),
+                Flux.Adam(learning_rate)
+            ),
+            model.gnn
+        )
+
+        @info "Training model for $epochs epochs..."
+        loss_history = Thesis.train_diffusion_model!(model, optim, train_loader, epochs=epochs)
+        final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
+    end
 
     num_params = sum(length, Flux.params(model.gnn))
 
-    optim = Flux.setup(
-        Flux.Optimisers.OptimiserChain(
-            Flux.Optimisers.ClipGrad(1.0f0), 
-            Flux.Adam(learning_rate)
-        ),
-        model.gnn
-    )
+    @info "Initializing Test dataset (Gurobi time limit: $(test_time_limit)s)..."
+    test_dataset = RuntimeDataset(num_test, generator, test_solver; max_concurrent_solves=workers)
+    test_loader = Flux.DataLoader(test_dataset, batchsize=batch_size, shuffle=false, collate=false)
 
-    @info "Training model for $epochs epochs..."
-    loss_history = Thesis.train_diffusion_model!(model, optim, train_loader, epochs=epochs)
-    final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
-
-    @info "Testing model on $num_test unseen instances & streaming to disk..."
+     @info "Testing model on $num_test unseen instances & streaming to disk..."
     total_model_score = 0.0
     total_true_score = 0.0
     total_graphs = 0
+    total_inference_time = 0.0   # NEW: accumulates GPU sampling time only
 
-    # Create directory for the streaming test instances
     test_results_dir = joinpath(pkgdir(Thesis), "results", "test_instances_$run_id")
     mkpath(test_results_dir)
 
     Flux.testmode!(model.gnn)
 
-    for batch in test_loader
-        # 1. Extract the raw CPU graphs generated on-the-fly
-        graphs = [item[1] for item in batch]
-        names = [item[2] for item in batch]
-        
-        # 2. Batch them for the GPU
-        g_batch = Flux.batch(graphs)
-        g_batch_gpu = g_batch |> Flux.gpu
-        target_x0 = g_batch_gpu.ndata.x 
+    @sync begin
+        global_test_idx = 1
+        batch_num = 0   # NEW: mirror training's batch counter
 
-        # 3. Predict Heatmap
-        shape = size(target_x0)
-        preds_probs = Thesis.sample_heatmap(model.method, model, shape, g_batch_gpu; inference_steps=inference_steps)
-        
-        true_mask = target_x0 .> 0.5f0
+        for batch in test_loader
+            graphs = [item[1] for item in batch]
+            names = ["test_instance_$(global_test_idx + k - 1).txt" for k in 1:length(graphs)]
+            global_test_idx += length(graphs)
 
-        # 4. Bring Heatmap back to CPU for Greedy Decoding
-        preds_probs_cpu = Flux.cpu(preds_probs)
-        
-        # --- NEW: Synchronous Greedy Decoding for Metrics ---
-        valid_masks_cpu = Vector{Vector{Int}}()
-        batch_model_score = 0.0
-        
-        start_slice = 1
-        for j in 1:length(graphs)
-            num_nodes = graphs[j].num_nodes
-            end_slice = start_slice + num_nodes - 1
-            
-            heatmap_slice = preds_probs_cpu[1, start_slice:end_slice]
-            
-            # Apply Greedy Decoder to ensure validity
-            mask_slice = Thesis.greedy_decode_mis(graphs[j], vec(heatmap_slice))
-            push!(valid_masks_cpu, mask_slice)
-            
-            # Sum the valid greedy size!
-            batch_model_score += sum(mask_slice)
-            
-            start_slice = end_slice + 1
-        end
+            g_batch = Flux.batch(graphs)
+            g_batch_gpu = g_batch |> Flux.gpu
+            target_x0 = g_batch_gpu.ndata.x
 
-        # Accumulate the CORRECT valid scores
-        total_model_score += batch_model_score
-        total_true_score += Float64(sum(true_mask))
-        total_graphs += length(graphs)
+            shape = size(target_x0)
+            batch_size_actual = length(graphs)
 
-        # 5. Stream to disk asynchronously 
-        # (Pass the already-decoded valid_masks_cpu to the background thread!)
-        let local_graphs = graphs, local_names = names, local_probs = preds_probs_cpu, local_masks = valid_masks_cpu
-            Threads.@spawn begin
-                start_idx = 1
-                for j in 1:length(local_graphs)
-                    g_single = local_graphs[j]
-                    num_nodes = g_single.num_nodes
-                    end_idx = start_idx + num_nodes - 1
-                    
-                    heatmap_slice = local_probs[1, start_idx:end_idx]
-                    mask_slice = local_masks[j] # Uses the valid greedy mask calculated above!
-                    
-                    # Extract graph edges
-                    s, t = edge_index(g_single)
-                    num_edges = div(length(s), 2)
-                    
-                    filepath = joinpath(test_results_dir, replace(local_names[j], ".txt" => "_result.txt"))
-                    
-                    open(filepath, "w") do io
-                        # Topography Block
-                        println(io, "$num_nodes $num_edges")
-                        for k in 1:length(s)
-                            if s[k] < t[k] # Only write undirected edges once
-                                println(io, "$(s[k]) $(t[k])")
+            batch_inference_time = @elapsed begin
+                preds_probs = Thesis.sample_heatmap(model.method, model, shape, g_batch_gpu)
+                CUDA.synchronize()
+            end
+            total_inference_time += batch_inference_time
+            avg_time_per_instance = batch_inference_time / batch_size_actual
+
+            batch_num += 1
+            @info "Batch $(batch_num) [$(total_graphs + batch_size_actual) instances total] | Total: $(round(batch_inference_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
+
+            true_mask = target_x0 .> 0.5f0
+            preds_probs_cpu = Flux.cpu(preds_probs)
+
+            valid_masks_cpu = Vector{Vector{Int}}()
+            batch_model_score = 0.0
+
+            start_slice = 1
+            for j in 1:length(graphs)
+                num_nodes = graphs[j].num_nodes
+                end_slice = start_slice + num_nodes - 1
+
+                heatmap_slice = preds_probs_cpu[1, start_slice:end_slice]
+                mask_slice = Thesis.greedy_decode_mis(graphs[j], vec(heatmap_slice))
+                push!(valid_masks_cpu, mask_slice)
+
+                batch_model_score += sum(mask_slice)
+                start_slice = end_slice + 1
+            end
+
+            total_model_score += batch_model_score
+            total_true_score += Float64(sum(true_mask))
+            total_graphs += batch_size_actual
+
+            let local_graphs = graphs, local_names = names, local_probs = preds_probs_cpu, local_masks = valid_masks_cpu
+                Threads.@spawn begin
+                    start_idx = 1
+                    for j in 1:length(local_graphs)
+                        g_single = local_graphs[j]
+                        num_nodes = g_single.num_nodes
+                        end_idx = start_idx + num_nodes - 1
+
+                        heatmap_slice = local_probs[1, start_idx:end_idx]
+                        mask_slice = local_masks[j]
+
+                        s, t = edge_index(g_single)
+                        num_edges = div(length(s), 2)
+
+                        filepath = joinpath(test_results_dir, replace(local_names[j], ".txt" => "_result.txt"))
+
+                        open(filepath, "w") do io
+                            println(io, "$num_nodes $num_edges")
+                            for k in 1:length(s)
+                                if s[k] < t[k]
+                                    println(io, "$(s[k]) $(t[k])")
+                                end
                             end
+                            println(io, join(Int.(vec(g_single.ndata.x)), " "))
+                            println(io, join(Int.(vec(mask_slice)), " "))
+                            println(io, join([@sprintf("%.4f", x) for x in vec(heatmap_slice)], " "))
                         end
-                        
-                        # Data Block
-                        println(io, join(Int.(vec(g_single.ndata.x)), " "))   # Ground Truth
-                        println(io, join(Int.(vec(mask_slice)), " "))         # Greedy Predicted Mask
-                        println(io, join([@sprintf("%.4f", x) for x in vec(heatmap_slice)], " ")) # Heatmap
+
+                        start_idx = end_idx + 1
                     end
-                    
-                    start_idx = end_idx + 1
                 end
             end
         end
@@ -275,10 +269,10 @@ function run_automated_pipeline(;
     avg_model_score = total_model_score / total_graphs
     avg_true_score = total_true_score / total_graphs
     performance_pct = (avg_model_score / avg_true_score) * 100
+    avg_inference_time_per_instance = total_inference_time / total_graphs
 
-    @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Optimal Score: $(round(avg_true_score, digits=2)) | Performance: $(round(performance_pct, digits=2))%"
+    @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Optimal Score: $(round(avg_true_score, digits=2)) | Performance: $(round(performance_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
 
-    # 6. Write Meta-Results to File
     results_dir = joinpath(pkgdir(Thesis), "results")
     mkpath(results_dir)
     filepath = joinpath(results_dir, "report-$run_id.txt")
@@ -289,43 +283,47 @@ function run_automated_pipeline(;
         println(io, "==================================================")
         println(io, "\n[ DATA CONFIGURATION ]")
         println(io, "Graph Generator: ", typeof(generator))
-        println(io, "Generator Params: ", generator) 
-        println(io, "Problem Solver:  ", typeof(solver))
-        println(io, "Solver Params:   ", solver)
+        println(io, "Generator Params: ", generator)
+        println(io, "Problem Solver (train):  ", typeof(solver), " ", solver)
+        println(io, "Problem Solver (test):   ", typeof(test_solver), " ", test_solver)
         println(io, "Training Instances: ", num_train)
         println(io, "Testing Instances:  ", num_test)
-        
+
         println(io, "\n[ MODEL CONFIGURATION ]")
-        println(io, "GNN Layers: ", gnn_config.num_layers)
-        println(io, "GNN Hidden Dim: ", gnn_config.hidden_dim)
+        println(io, "Method: ", typeof(model.method))
+        println(io, "GNN Layers: ", model.gnn.config.num_layers)
+        println(io, "GNN Hidden Dim: ", model.gnn.config.hidden_dim)
         println(io, "Total Parameters: ", num_params)
-        println(io, "Diffusion Steps: ", diffusion_steps)
-        println(io, "Inference Steps: ", inference_steps)
-        
+        println(io, "Timesteps (T): ", Thesis.get_num_timesteps(model.method))
+        println(io, "Inference Steps: ", model.method.scheduler.inference_steps)
+
         println(io, "\n[ TRAINING HYPERPARAMETERS ]")
+        println(io, "Loaded pretrained model: ", model_already_exists)
         println(io, "Epochs: ", epochs)
         println(io, "Batch Size: ", batch_size)
         println(io, "Learning Rate: ", learning_rate)
-        
+
         println(io, "\n[ RESULTS & METRICS ]")
-        println(io, "Final Training Loss: ", round(final_train_loss, digits=6))
+        println(io, "Final Training Loss: ", model_already_exists ? "N/A (loaded)" : round(final_train_loss, digits=6))
         println(io, "--------------------------------------------------")
         println(io, "Avg Optimal MIS Size:   ", round(avg_true_score, digits=2))
         println(io, "Avg Predicted MIS Size: ", round(avg_model_score, digits=2))
         println(io, "Approximation Ratio:    ", round(performance_pct, digits=2), "%")
+        println(io, "--------------------------------------------------")
+        println(io, "Total Inference Time (sampling only): ", round(total_inference_time, digits=4), "s")
+        println(io, "Avg Inference Time per Instance:       ", round(avg_inference_time_per_instance, digits=4), "s")
         println(io, "==================================================")
     end
 
     @info "Report saved to $filepath"
-    
-    # 7. Save the Trained Model
-    @info "Saving trained model weights..."
-    models_dir = joinpath(pkgdir(Thesis), "models") 
-    mkpath(models_dir)
-    model_path = joinpath(models_dir, "model-$run_id.jld2")
-    
-    Thesis.save_model(model, model_path)
-    @info "Model successfully saved to $model_path"
+
+    if !model_already_exists
+        @info "Saving trained model weights..."
+        Thesis.save_model(model, model_path)
+        @info "Model successfully saved to $model_path"
+    else
+        @info "Skipped saving — model was loaded from disk, weights unchanged."
+    end
 
     return filepath
 end
