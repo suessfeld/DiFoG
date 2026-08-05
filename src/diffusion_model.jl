@@ -9,8 +9,6 @@ struct DiffusionModel{G<:GNN, M<:Diffusion}
     method::M
 end
 
-Flux.@layer DiffusionModel
-
 """
     (model::DiffusionModel)(g::GNNGraph, x::AbstractMatrix)
 
@@ -84,7 +82,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
             wait_time = time() - t_start_wait
             
             # If the wait time is longer than 50ms, log a starvation warning
-            if wait_time > 0.05
+            if wait_time > 0.01
                 @debug "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
             end
             
@@ -101,7 +99,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
             
             avg_time_per_instance = batch_time / batch_size
             
-            @info "Batch $(num_batches + 1) [$(batch_size*num_batches) instances total] | Total: $(round(batch_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
+            @info "Batch $(num_batches + 1) [$(batch_size*num_batches) instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | GPU Wait time (for solver): $(round(wait_time, digits=4))s"
 
             epoch_loss += loss
             num_batches += 1

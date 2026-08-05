@@ -1,4 +1,3 @@
-# src/utils/data/problems/misp.jl
 using Graphs
 using JuMP
 using Gurobi
@@ -8,10 +7,13 @@ export MISPSolver
 const NUM_GUROBI_LICENSES = 2 
 const GRB_ENV_POOL = Channel{Gurobi.Env}(NUM_GUROBI_LICENSES)
 
-# Called exactly once from Thesis.__init__()
 function _init_gurobi_env!()
     for _ in 1:NUM_GUROBI_LICENSES
-        put!(GRB_ENV_POOL, Gurobi.Env())
+        try
+            put!(GRB_ENV_POOL, Gurobi.Env())
+        catch e
+            @error "Failed to initialize Gurobi Environment during startup" exception=e
+        end
     end
     return
 end
@@ -26,15 +28,14 @@ function (solver::MISPSolver)(g::AbstractGraph)
     n = nv(g)
     env = take!(GRB_ENV_POOL)
     x_0 = zeros(Float32, 1, n)
+    is_poisoned = false
     
-    # Helper to safely encapsulate the build-and-solve logic
     function build_and_solve(current_env)
         model = Model(() -> Gurobi.Optimizer(current_env))
         set_silent(model)
         set_optimizer_attribute(model, "TimeLimit", solver.time_limit)
         set_optimizer_attribute(model, "Threads", 1)
 
-        # The macro attaches 'x' to the JuMP model dictionary
         @variable(model, x[1:n], Bin)
         for e in edges(g)
             @constraint(model, x[src(e)] + x[dst(e)] <= 1)
@@ -45,33 +46,58 @@ function (solver::MISPSolver)(g::AbstractGraph)
     end
 
     try
-        model = nothing
-        try
-            model = build_and_solve(env)
-        catch opt_e
-            @warn "Gurobi Token/Network Dropped. Auto-healing WLS environment..." exception=opt_e
-            # 1. Discard the poisoned environment by requesting a fresh one
-            env = Gurobi.Env()
-            
-            # 2. Retry the build and solve exactly once with the fresh token
-            model = build_and_solve(env)
-        end
-
+        model = build_and_solve(env)
         status = termination_status(model)
         if status == MOI.OPTIMAL || (status == MOI.TIME_LIMIT && has_values(model))
-            x_var = model[:x] # Retrieve the variable reference from the JuMP dictionary
+            x_var = model[:x]
             for i in 1:n
                 value(x_var[i]) > 0.5 && (x_0[1, i] = 1.0f0)
             end
-        else
-            @warn "Gurobi hit the time limit without finding ANY valid solution."
         end
-        
         empty!(model)
+    catch opt_e
+        @warn "Gurobi Token/Network Dropped. Discarding environment and attempting recovery..." exception=opt_e
+        is_poisoned = true
+        
+        try
+            new_env = Gurobi.Env()
+            model = build_and_solve(new_env)
+            status = termination_status(model)
+            if status == MOI.OPTIMAL || (status == MOI.TIME_LIMIT && has_values(model))
+                x_var = model[:x]
+                for i in 1:n
+                    value(x_var[i]) > 0.5 && (x_0[1, i] = 1.0f0)
+                end
+            end
+            empty!(model)
+            env = new_env
+            is_poisoned = false
+        catch recovery_e
+            @error "WLS recovery failed. Network connection is completely offline." exception=recovery_e
+        end
     finally
-        # Put the environment (either the original healthy one, or the newly healed one) 
-        # safely back into the pool.
-        put!(GRB_ENV_POOL, env)
+        if !is_poisoned
+            put!(GRB_ENV_POOL, env)
+        else
+            @warn "Discarded poisoned Gurobi environment. Re-allocating placeholder to maintain license pool..."
+            Threads.@spawn begin
+                sleep(5)
+                try
+                    recovered_env = Gurobi.Env()
+                    put!(GRB_ENV_POOL, recovered_env)
+                    @info "Successfully restored license slot to pool."
+                catch e
+                    @error "Could not restore license slot. Retrying connection later." exception=e
+                    sleep(10)
+                    try
+                        recovered_env = Gurobi.Env()
+                        put!(GRB_ENV_POOL, recovered_env)
+                    catch second_e
+                        @error "Critical: Environment slot permanently lost until network restores." exception=second_e
+                    end
+                end
+            end
+        end
     end
     
     return x_0

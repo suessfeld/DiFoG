@@ -19,10 +19,8 @@ end
 """
     RuntimeDataset(num_instances, generator, solver; max_concurrent_solves=2, buffer_capacity=4*max_concurrent_solves)
 
-Starts exactly `max_concurrent_solves` persistent background workers (matching
-your Gurobi license's session baseline) that continuously generate + solve
-instances into a bounded buffer. `getindex` just drains the buffer — it never
-blocks on a fresh Gurobi solve as long as production keeps up with consumption.
+Dataset that is solved during runtime
+TODO Docs
 """
 function RuntimeDataset(num_instances::Int, generator::G, solver::P;
                          max_concurrent_solves::Int=2,
@@ -42,7 +40,7 @@ function RuntimeDataset(num_instances::Int, generator::G, solver::P;
                     put!(buffer, (normalize_graph(gnn_g), "runtime_inst_$(n).txt"))
                     n += 1
                 catch e
-                    # Ensures the background task doesn't die silently!
+                    # Ensures the background task doesn't die silently! This happened sometimes at the cluster
                     @error "Background dataset worker crashed! Logging and resuming..." exception=(e, catch_backtrace())
                     sleep(1) # Prevent a tight infinite loop if the error is permanent
                 end

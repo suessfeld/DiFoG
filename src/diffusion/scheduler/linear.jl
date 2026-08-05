@@ -1,20 +1,39 @@
 export LinearScheduler
 
-struct LinearScheduler <: Scheduler
-    num_timesteps::Int
+struct LinearScheduler{T} <: Scheduler{T}
+    total_steps::Int
     inference_steps::Int
-    steps::Vector{Int}
+    steps::Vector{T}
 end
 
-function LinearScheduler(num_timesteps::Int, inference_steps::Int)
-    c = num_timesteps / inference_steps
+LinearScheduler(total_steps::Int, inference_steps::Int) = LinearScheduler(Int, total_steps, inference_steps)
+
+function LinearScheduler(::Type{Int}, total_steps::Int, inference_steps::Int)
+    if inference_steps >= total_steps
+        return LinearScheduler{Int}(total_steps, inference_steps, collect(1:total_steps))
+    end
+    
+    c = Float64(total_steps) / Float64(inference_steps)
     steps = [max(1, floor(Int, c * i)) for i in 1:inference_steps]
-    return LinearScheduler(num_timesteps, inference_steps, steps)
+    return LinearScheduler{Int}(total_steps, inference_steps, steps)
 end
 
-function get_betas(s::LinearScheduler)
-    scale = 1000 / s.num_timesteps
-    β_1 = scale * 1e-4
-    β_T = scale * 0.02
-    return Float32.(range(β_1, β_T, length=s.num_timesteps))
+function LinearScheduler(::Type{Float32}, total_steps::Int, inference_steps::Int)
+    if inference_steps >= total_steps
+        steps = collect(1:total_steps) ./ Float32(total_steps)
+        return LinearScheduler{Float32}(total_steps, inference_steps, steps)
+    end
+    
+    c = Float64(total_steps) / Float64(inference_steps)
+    steps_int = [max(1, floor(Int, c * i)) for i in 1:inference_steps]
+    steps = Float32.(steps_int) ./ Float32(total_steps)
+    return LinearScheduler{Float32}(total_steps, inference_steps, steps)
+end
+
+Base.convert(::Type{Scheduler{T}}, s::LinearScheduler) where {T} = LinearScheduler(T, s.total_steps, s.inference_steps)
+Base.convert(::Type{LinearScheduler{T}}, s::LinearScheduler) where {T} = LinearScheduler(T, s.total_steps, s.inference_steps)
+
+# Catch GPU arrays during Flux.gpu traversal and force them back to the CPU
+function LinearScheduler(total_steps::Int, inference_steps::Int, steps::AbstractVector{T}) where T
+    return LinearScheduler{T}(total_steps, inference_steps, Array(steps))
 end

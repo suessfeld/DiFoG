@@ -124,7 +124,7 @@ function run_automated_pipeline(;
     batch_size::Int = 16,
     learning_rate::Float64 = 1e-3,
     workers::Int = 12,
-    test_time_limit::Float64 = 2.0
+    test_time_limit::Float64 = 2.0,
 )
     @info "=== Starting Pipeline Run: $run_id ==="
 
@@ -134,8 +134,6 @@ function run_automated_pipeline(;
 
     model_already_exists = isfile(model_path)
 
-    # Use a longer Gurobi budget for test instances only, so evaluation targets
-    # are as close to optimal as practical, even if training used a tight limit.
     test_solver = solver isa MISPSolver ? MISPSolver(time_limit=test_time_limit) : solver
 
     final_train_loss = NaN
@@ -173,7 +171,7 @@ function run_automated_pipeline(;
     total_model_score = 0.0
     total_true_score = 0.0
     total_graphs = 0
-    total_inference_time = 0.0   # NEW: accumulates GPU sampling time only
+    total_inference_time = 0.0
 
     test_results_dir = joinpath(pkgdir(Thesis), "results", "test_instances_$run_id")
     mkpath(test_results_dir)
@@ -182,7 +180,7 @@ function run_automated_pipeline(;
 
     @sync begin
         global_test_idx = 1
-        batch_num = 0   # NEW: mirror training's batch counter
+        batch_num = 0
 
         for batch in test_loader
             graphs = [item[1] for item in batch]
@@ -277,6 +275,14 @@ function run_automated_pipeline(;
     mkpath(results_dir)
     filepath = joinpath(results_dir, "report-$run_id.txt")
 
+    if !model_already_exists
+        @info "Saving trained model weights..."
+        Thesis.save_model(model, model_path)
+        @info "Model successfully saved to $model_path"
+    else
+        @info "Skipped saving — model was loaded from disk, weights unchanged."
+    end
+
     open(filepath, "w") do io
         println(io, "==================================================")
         println(io, "   PIPELINE RUN: $run_id              ")
@@ -294,7 +300,7 @@ function run_automated_pipeline(;
         println(io, "GNN Layers: ", model.gnn.config.num_layers)
         println(io, "GNN Hidden Dim: ", model.gnn.config.hidden_dim)
         println(io, "Total Parameters: ", num_params)
-        println(io, "Timesteps (T): ", Thesis.get_num_timesteps(model.method))
+        println(io, "Timesteps (T): ", model.method.scheduler.total_steps)
         println(io, "Inference Steps: ", model.method.scheduler.inference_steps)
 
         println(io, "\n[ TRAINING HYPERPARAMETERS ]")

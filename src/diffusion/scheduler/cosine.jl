@@ -1,22 +1,38 @@
 export CosineScheduler
 
-struct CosineScheduler <: Scheduler
-    num_timesteps::Int
+struct CosineScheduler{T} <: Scheduler{T}
+    total_steps::Int
     inference_steps::Int
-    steps::Vector{Int}
+    steps::Vector{T}
 end
 
-function CosineScheduler(num_timesteps::Int, inference_steps::Int)
+CosineScheduler(total_steps::Int, inference_steps::Int) = CosineScheduler(Int, total_steps, inference_steps)
+
+function CosineScheduler(::Type{Int}, total_steps::Int, inference_steps::Int)
+    if inference_steps >= total_steps
+        return CosineScheduler{Int}(total_steps, inference_steps, collect(1:total_steps))
+    end
+    
     c = 1.0 / inference_steps
-    steps = [max(1, floor(Int, cos((1.0 - c * i) * (π / 2.0)) * num_timesteps)) for i in 1:inference_steps]
-    return CosineScheduler(num_timesteps, inference_steps, steps)
+    steps = [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps]
+    return CosineScheduler{Int}(total_steps, inference_steps, steps)
 end
 
-function get_betas(s::CosineScheduler)
-    s_param = 0.008
-    steps_range = 0:s.num_timesteps
-    f(t) = cos(((t / s.num_timesteps + s_param) / (1 + s_param)) * (pi / 2))^2
-    αs_cum_prod_raw = [f(t) / f(0) for t in steps_range]
-    βs = [1 - (αs_cum_prod_raw[t+1] / αs_cum_prod_raw[t]) for t in 1:s.num_timesteps]
-    return Float32.(clamp.(βs, 0.0, 0.999))
+function CosineScheduler(::Type{Float32}, total_steps::Int, inference_steps::Int)
+    if inference_steps >= total_steps
+        steps = collect(1:total_steps) ./ Float32(total_steps)
+        return CosineScheduler{Float32}(total_steps, inference_steps, steps)
+    end
+    
+    c = 1.0 / inference_steps
+    steps_int = [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps]
+    steps = Float32.(steps_int) ./ Float32(total_steps)
+    return CosineScheduler{Float32}(total_steps, inference_steps, steps)
+end
+
+Base.convert(::Type{Scheduler{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)
+Base.convert(::Type{CosineScheduler{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)
+
+function CosineScheduler(total_steps::Int, inference_steps::Int, steps::AbstractVector{T}) where T
+    return CosineScheduler{T}(total_steps, inference_steps, Array(steps))
 end
