@@ -6,6 +6,7 @@ export MISPSolver
 
 const NUM_GUROBI_LICENSES = 2 
 const GRB_ENV_POOL = Channel{Gurobi.Env}(NUM_GUROBI_LICENSES)
+const GRB_ENV = Ref{Gurobi.Env}()
 
 function _init_gurobi_env!()
     for _ in 1:NUM_GUROBI_LICENSES
@@ -14,6 +15,13 @@ function _init_gurobi_env!()
         catch e
             @error "Failed to initialize Gurobi Environment during startup" exception=e
         end
+    end
+
+    # NEW — initialize the single shared env used by NodeSelectionsProblems.jl's ILP!
+    try
+        GRB_ENV[] = Gurobi.Env()
+    catch e
+        @error "Failed to initialize shared Gurobi Environment (GRB_ENV) for NodeSelectionsProblems.jl" exception=e
     end
     return
 end

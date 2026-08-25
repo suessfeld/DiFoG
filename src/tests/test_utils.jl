@@ -5,113 +5,7 @@ using Dates
 using Statistics
 using Base.Iterators: partition
 
-function run_inference_and_save(model::DiffusionModel, test_pairs, inferences_dir, batch_size=128)
-    total_instances = length(test_pairs)
-
-    @sync begin
-        for i in 1:batch_size:total_instances
-            end_idx = min(i + batch_size - 1, total_instances)
-
-            batch = test_pairs[i:end_idx]
-            graphs = [item[1] for item in batch]
-            filenames = [item[2] for item in batch]
-            node_counts = [g.num_nodes for g in graphs]
-
-            batch_time = @elapsed begin
-                heatmaps = Thesis.infer(model, Flux.batch(graphs))
-            end
-
-            actual_batch_size = length(batch)
-            batch_num = div(i - 1, batch_size) + 1
-            avg_time_per_instance = batch_time / actual_batch_size
-
-            @info "Batch $batch_num [$(end_idx) instances total] | Total: $(round(batch_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
-
-            Threads.@spawn begin
-                start_slice = 1
-                for j in 1:length(graphs)
-                    num_nodes = node_counts[j]
-                    end_slice = start_slice + num_nodes - 1
-
-                    heatmap_slice = heatmaps[1, start_slice:end_slice]
-
-                    solution_binary = Int.(vec(graphs[j].ndata.x))
-                    heatmap_vec = vec(heatmap_slice)
-
-                    sol_str = join(solution_binary, "  ")
-                    heatmap_str = join([@sprintf("%.1f", x) for x in heatmap_vec], " ")
-
-                    result_filename = replace(filenames[j], ".txt" => "_result.txt")
-                    result_path = joinpath(inferences_dir, result_filename)
-
-                    open(result_path, "w") do io
-                        println(io, num_nodes)
-                        println(io, sol_str)
-                        println(io, heatmap_str)
-                    end
-                    start_slice = end_slice + 1
-                end
-            end
-        end
-    end
-end
-
-function run_inference_greedy_and_save(model::DiffusionModel, test_pairs, inferences_dir, batch_size=128)
-    total_instances = length(test_pairs)
-
-    @sync begin
-        for i in 1:batch_size:total_instances
-            end_idx = min(i + batch_size - 1, total_instances)
-
-            batch = test_pairs[i:end_idx]
-            graphs = [item[1] for item in batch] 
-            filenames = [item[2] for item in batch]
-            node_counts = [g.num_nodes for g in graphs]
-
-            batch_time = @elapsed begin
-                heatmaps = Thesis.infer(model, Flux.batch(graphs))
-            end
-
-            actual_batch_size = length(batch)
-            batch_num = div(i - 1, batch_size) + 1
-            avg_time_per_instance = batch_time / actual_batch_size
-
-            @info "Batch $batch_num [$(end_idx) instances total] | Total: $(round(batch_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
-
-            Threads.@spawn begin
-                start_slice = 1
-                for j in 1:length(graphs)
-                    num_nodes = node_counts[j]
-                    end_slice = start_slice + num_nodes - 1
-
-                    heatmap_slice = heatmaps[1, start_slice:end_slice]
-                    heatmap_vec = vec(heatmap_slice)
-
-                    decoded_mask = Thesis.greedy_decode_mis(graphs[j], heatmap_vec)
-
-                    solution_binary = Int.(vec(graphs[j].ndata.x))
-                    decoded_binary = Int.(decoded_mask)
-                    
-                    sol_str = join(solution_binary, "  ")
-                    decoded_str = join(decoded_binary, "  ")
-                    heatmap_str = join([@sprintf("%.1f", x) for x in heatmap_vec], " ")
-
-                    result_filename = replace(filenames[j], ".txt" => "_result.txt")
-                    result_path = joinpath(inferences_dir, result_filename)
-
-                    open(result_path, "w") do io
-                        println(io, num_nodes)
-                        println(io, sol_str)     
-                        println(io, decoded_str) 
-                        println(io, heatmap_str) 
-                    end
-                    
-                    start_slice = end_slice + 1
-                end
-            end
-        end
-    end
-end
+# ... run_inference_and_save / run_inference_greedy_and_save unchanged ...
 
 function run_automated_pipeline(;
     run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),
@@ -125,6 +19,7 @@ function run_automated_pipeline(;
     learning_rate::Float64 = 1e-3,
     workers::Int = 12,
     test_time_limit::Float64 = 2.0,
+    num_repeat_inference::Int = 5,   # NEW — how many times the LAST test instance is re-inferred for stability
 )
     @info "=== Starting Pipeline Run: $run_id ==="
 
@@ -167,11 +62,20 @@ function run_automated_pipeline(;
     test_dataset = RuntimeDataset(num_test, generator, test_solver; max_concurrent_solves=workers)
     test_loader = Flux.DataLoader(test_dataset, batchsize=batch_size, shuffle=false, collate=false)
 
-     @info "Testing model on $num_test unseen instances & streaming to disk..."
+    @info "Testing model on $num_test unseen instances & streaming to disk..."
     total_model_score = 0.0
     total_true_score = 0.0
     total_graphs = 0
     total_inference_time = 0.0
+
+    # NEW — heatmap-quality accumulators
+    total_confidence = 0.0      # decisiveness (1 - H̄/ln2), higher = more decisive
+    total_entropy = 0.0         # raw mean binary entropy H̄
+    total_correction_rate = 0.0 # fraction of nodes flipped by greedy decoding vs naive threshold
+
+    # NEW — tracks the very last (graph, name) processed, for repeated-inference stability test
+    last_test_graph = nothing
+    last_test_instance_idx = 0
 
     test_results_dir = joinpath(pkgdir(Thesis), "results", "test_instances_$run_id")
     mkpath(test_results_dir)
@@ -216,16 +120,32 @@ function run_automated_pipeline(;
                 end_slice = start_slice + num_nodes - 1
 
                 heatmap_slice = preds_probs_cpu[1, start_slice:end_slice]
-                mask_slice = Thesis.greedy_decode_mis(graphs[j], vec(heatmap_slice))
+                heatmap_vec = vec(heatmap_slice)
+                mask_slice = Thesis.greedy_decode_maxcut(graphs[j], heatmap_vec)
                 push!(valid_masks_cpu, mask_slice)
 
                 batch_model_score += sum(mask_slice)
+
+                # NEW — heatmap decisiveness (mean binary entropy → confidence score)
+                mean_entropy, confidence = Thesis.heatmap_decisiveness(heatmap_vec)
+                total_entropy += mean_entropy
+                total_confidence += confidence
+
+                # NEW — correction distance (naive threshold vs feasible greedy mask), normalized by node count
+                corr_dist = Thesis.correction_distance(heatmap_vec, mask_slice)
+                total_correction_rate += corr_dist / num_nodes
+
                 start_slice = end_slice + 1
             end
 
             total_model_score += batch_model_score
             total_true_score += Float64(sum(true_mask))
             total_graphs += batch_size_actual
+
+            # NEW — remember the last graph/index of this batch (overwritten each batch;
+            # after the loop this is the true LAST test instance)
+            last_test_graph = graphs[end]
+            last_test_instance_idx = global_test_idx - 1
 
             let local_graphs = graphs, local_names = names, local_probs = preds_probs_cpu, local_masks = valid_masks_cpu
                 Threads.@spawn begin
@@ -262,18 +182,72 @@ function run_automated_pipeline(;
         end
     end
 
-    Flux.trainmode!(model.gnn)
-
     avg_model_score = total_model_score / total_graphs
     avg_true_score = total_true_score / total_graphs
     performance_pct = (avg_model_score / avg_true_score) * 100
     avg_inference_time_per_instance = total_inference_time / total_graphs
 
+    # NEW — averages over all test instances
+    avg_confidence = total_confidence / total_graphs
+    avg_entropy = total_entropy / total_graphs
+    avg_correction_rate = total_correction_rate / total_graphs
+
     @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Optimal Score: $(round(avg_true_score, digits=2)) | Performance: $(round(performance_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
+    @info "Heatmap Quality | Avg Decisiveness: $(round(avg_confidence, digits=4)) (H̄=$(round(avg_entropy, digits=4))) | Avg Greedy Correction Rate: $(round(avg_correction_rate, digits=4))"
+
+    # ============================================================
+    # NEW — Hamming-distance stability test: re-infer the LAST test
+    # instance `num_repeat_inference` times and measure heatmap/
+    # decoded-mask variance across independent reverse-diffusion runs.
+    # ============================================================
+    avg_hamming_stability = NaN
+    if num_repeat_inference > 1 && !isnothing(last_test_graph)
+        @info "Running $(num_repeat_inference) repeated inferences on instance $(last_test_instance_idx) for stability measurement..."
+
+        g_repeat_gpu = last_test_graph |> Flux.gpu
+        shape = (1, g_repeat_gpu.num_nodes)
+
+        s, t = edge_index(last_test_graph)
+        num_edges = div(length(s), 2)
+        gt_solution = Int.(vec(last_test_graph.ndata.x))
+
+        repeat_masks = Vector{Vector{Int}}(undef, num_repeat_inference)
+
+        for r in 1:num_repeat_inference
+            heatmap_r = Thesis.sample_heatmap(model.method, model, shape, g_repeat_gpu)
+            heatmap_r_cpu = vec(Flux.cpu(heatmap_r))
+            mask_r = Int.(vec(Thesis.greedy_decode_maxcut(last_test_graph, heatmap_r_cpu)))
+            repeat_masks[r] = mask_r
+
+            filepath = joinpath(test_results_dir, "test_instance_$(last_test_instance_idx)_$(r)_result.txt")
+            open(filepath, "w") do io
+                println(io, "$(last_test_graph.num_nodes) $num_edges")
+                for k in 1:length(s)
+                    if s[k] < t[k]
+                        println(io, "$(s[k]) $(t[k])")
+                    end
+                end
+                println(io, join(gt_solution, " "))
+                println(io, join(mask_r, " "))
+                println(io, join([@sprintf("%.4f", x) for x in heatmap_r_cpu], " "))
+            end
+        end
+
+        pairwise_distances = Float64[]
+        for i in 1:num_repeat_inference, j in (i+1):num_repeat_inference
+            hd = Thesis.hamming_distance(repeat_masks[i], repeat_masks[j])
+            push!(pairwise_distances, hd / last_test_graph.num_nodes)
+        end
+        avg_hamming_stability = isempty(pairwise_distances) ? 0.0 : mean(pairwise_distances)
+
+        @info "Repeated Inference Stability | Instance $(last_test_instance_idx) | Avg Normalized Hamming Distance across $(num_repeat_inference) runs: $(round(avg_hamming_stability, digits=4))"
+    end
+
+    Flux.trainmode!(model.gnn)
 
     results_dir = joinpath(pkgdir(Thesis), "results")
     mkpath(results_dir)
-    filepath = joinpath(results_dir, "report-$run_id.txt")
+    filepath = joinpath(results_dir, "report-$run_id.tex")
 
     if !model_already_exists
         @info "Saving trained model weights..."
@@ -283,45 +257,73 @@ function run_automated_pipeline(;
         @info "Skipped saving — model was loaded from disk, weights unchanged."
     end
 
+    label_base = replace(run_id, r"[^A-Za-z0-9]" => "-")
+
     open(filepath, "w") do io
-        println(io, "==================================================")
-        println(io, "   PIPELINE RUN: $run_id              ")
-        println(io, "==================================================")
-        println(io, "\n[ DATA CONFIGURATION ]")
-        println(io, "Graph Generator: ", typeof(generator))
-        println(io, "Generator Params: ", generator)
-        println(io, "Problem Solver (train):  ", typeof(solver), " ", solver)
-        println(io, "Problem Solver (test):   ", typeof(test_solver), " ", test_solver)
-        println(io, "Training Instances: ", num_train)
-        println(io, "Testing Instances:  ", num_test)
+        println(io, "% Auto-generated pipeline report — copy directly into thesis .tex source")
+        println(io, "\\subsection{Pipeline Run: $(latex_escape(run_id))}")
+        println(io, "\\label{sec:run-$(label_base)}")
+        println(io)
 
-        println(io, "\n[ MODEL CONFIGURATION ]")
-        println(io, "Method: ", typeof(model.method))
-        println(io, "GNN Layers: ", model.gnn.config.num_layers)
-        println(io, "GNN Hidden Dim: ", model.gnn.config.hidden_dim)
-        println(io, "Total Parameters: ", num_params)
-        println(io, "Timesteps (T): ", model.method.scheduler.total_steps)
-        println(io, "Inference Steps: ", model.method.scheduler.inference_steps)
+        # ---- Data Configuration ----
+        println(io, "\\subsubsection{Data Configuration}")
+        write_latex_kv_table(io, [
+            ("Graph Generator", string(typeof(generator))),
+            ("Generator Params", string(generator)),
+            ("Problem Solver (train)", "$(typeof(solver)) $(solver)"),
+            ("Problem Solver (test)", "$(typeof(test_solver)) $(test_solver)"),
+            ("Training Instances", string(num_train)),
+            ("Testing Instances", string(num_test)),
+        ]; caption="Data configuration for run $(run_id)", label="tab:data-$(label_base)")
 
-        println(io, "\n[ TRAINING HYPERPARAMETERS ]")
-        println(io, "Loaded pretrained model: ", model_already_exists)
-        println(io, "Epochs: ", epochs)
-        println(io, "Batch Size: ", batch_size)
-        println(io, "Learning Rate: ", learning_rate)
+        # ---- Model Configuration ----
+        println(io, "\\subsubsection{Model Configuration}")
+        write_latex_kv_table(io, [
+            ("Method", string(typeof(model.method))),
+            ("GNN Layers", string(model.gnn.config.num_layers)),
+            ("GNN Hidden Dim", string(model.gnn.config.hidden_dim)),
+            ("Total Parameters", string(num_params)),
+            ("Timesteps (T)", string(model.method.scheduler.total_steps)),
+            ("Inference Steps", string(model.method.scheduler.inference_steps)),
+        ]; caption="Model configuration for run $(run_id)", label="tab:model-$(label_base)")
 
-        println(io, "\n[ RESULTS & METRICS ]")
-        println(io, "Final Training Loss: ", model_already_exists ? "N/A (loaded)" : round(final_train_loss, digits=6))
-        println(io, "--------------------------------------------------")
-        println(io, "Avg Optimal MIS Size:   ", round(avg_true_score, digits=2))
-        println(io, "Avg Predicted MIS Size: ", round(avg_model_score, digits=2))
-        println(io, "Approximation Ratio:    ", round(performance_pct, digits=2), "%")
-        println(io, "--------------------------------------------------")
-        println(io, "Total Inference Time (sampling only): ", round(total_inference_time, digits=4), "s")
-        println(io, "Avg Inference Time per Instance:       ", round(avg_inference_time_per_instance, digits=4), "s")
-        println(io, "==================================================")
+        # ---- Training Hyperparameters ----
+        println(io, "\\subsubsection{Training Hyperparameters}")
+        write_latex_kv_table(io, [
+            ("Loaded pretrained model", string(model_already_exists)),
+            ("Epochs", string(epochs)),
+            ("Batch Size", string(batch_size)),
+            ("Learning Rate", string(learning_rate)),
+        ]; caption="Training hyperparameters for run $(run_id)", label="tab:hyperparams-$(label_base)")
+
+        # ---- Results & Metrics ----
+        println(io, "\\subsubsection{Results \\& Metrics}")
+        write_latex_kv_table(io, [
+            ("Final Training Loss", model_already_exists ? "N/A (loaded)" : string(round(final_train_loss, digits=6))),
+            ("Avg Optimal Solution Size", string(round(avg_true_score, digits=2))),
+            ("Avg Predicted Solution Size", string(round(avg_model_score, digits=2))),
+            ("Approximation Ratio (\\%)", string(round(performance_pct, digits=2))),
+            ("Total Inference Time (s)", string(round(total_inference_time, digits=4))),
+            ("Avg Inference Time / Instance (s)", string(round(avg_inference_time_per_instance, digits=4))),
+        ]; caption="Results and performance metrics for run $(run_id)", label="tab:results-$(label_base)")
+
+        # ---- Heatmap Quality ----
+        println(io, "\\subsubsection{Heatmap Quality}")
+        write_latex_kv_table(io, [
+            ("Avg Mean Binary Entropy \$\\bar{H}\$ (lower = more decisive)", string(round(avg_entropy, digits=4))),
+            ("Avg Decisiveness Score \$1 - \\bar{H}/\\ln 2\$ (higher = better)", string(round(avg_confidence, digits=4))),
+            ("Avg Greedy Correction Rate", string(round(avg_correction_rate, digits=4))),
+        ]; caption="Heatmap decisiveness and greedy-decoding correction metrics for run $(run_id)", label="tab:heatmap-$(label_base)")
+
+        # ---- Inference Stability ----
+        println(io, "\\subsubsection{Inference Stability}")
+        write_latex_kv_table(io, [
+            ("Repeated Inferences on Last Instance", string(num_repeat_inference)),
+            ("Avg Normalized Hamming Distance across repeats", isnan(avg_hamming_stability) ? "N/A" : string(round(avg_hamming_stability, digits=4))),
+        ]; caption="Repeated-inference stability metrics for run $(run_id)", label="tab:stability-$(label_base)")
     end
 
-    @info "Report saved to $filepath"
+    @info "LaTeX report saved to $filepath"
 
     if !model_already_exists
         @info "Saving trained model weights..."
@@ -332,4 +334,56 @@ function run_automated_pipeline(;
     end
 
     return filepath
+end
+
+# ============================================================
+# LaTeX report helpers
+# ============================================================
+
+"""
+    latex_escape(s)
+
+Escapes LaTeX special characters in a value before embedding it in generated
+`.tex` output (run_ids, type names, etc. commonly contain `_`).
+"""
+function latex_escape(s)
+    str = string(s)
+    str = replace(str, "\\" => "\\textbackslash{}")
+    for (from, to) in (
+        "_" => "\\_", "%" => "\\%", "&" => "\\&", "#" => "\\#",
+        "\$" => "\\\$", "{" => "\\{", "}" => "\\}",
+        "^" => "\\textasciicircum{}", "~" => "\\textasciitilde{}",
+    )
+        str = replace(str, from => to)
+    end
+    return str
+end
+
+"""
+    write_latex_kv_table(io, rows; caption=nothing, label=nothing)
+
+Writes a simple two-column `Parameter | Value` LaTeX table from
+`rows::Vector{Tuple{String,String}}`. Values are escaped; pass pre-escaped
+strings if you need raw LaTeX (e.g. already-escaped math).
+"""
+function write_latex_kv_table(io, rows::Vector{<:Tuple}; caption=nothing, label=nothing)
+    println(io, "\\begin{table}[h!]")
+    println(io, "\\centering")
+    println(io, "\\begin{tabular}{ll}")
+    println(io, "\\toprule")
+    println(io, "\\textbf{Parameter} & \\textbf{Value} \\\\")
+    println(io, "\\midrule")
+    for (k, v) in rows
+        println(io, "$(latex_escape(k)) & $(latex_escape(v)) \\\\")
+    end
+    println(io, "\\bottomrule")
+    println(io, "\\end{tabular}")
+    if !isnothing(caption)
+        println(io, "\\caption{$(latex_escape(caption))}")
+    end
+    if !isnothing(label)
+        println(io, "\\label{$label}")
+    end
+    println(io, "\\end{table}")
+    println(io)
 end

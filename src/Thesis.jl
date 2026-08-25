@@ -6,6 +6,7 @@ using GraphNeuralNetworks
 using Statistics
 using DotEnv
 using Logging
+using MHLib
 
 DotEnv.load!(joinpath(@__DIR__, ".env"))
 
@@ -43,6 +44,10 @@ include("./utils/data/graphs/basic.jl")
 
 include("./utils/data/problems/misp.jl")
 include("./utils/data/problems/maxdeg.jl")
+
+abstract type Config end
+include("./utils/data/problems/NodeSelectionProblems.jl")
+include("./utils/data/problems/maxcut.jl")
 
 function __init__()
     DotEnv.load!(joinpath(@__DIR__, ".env"))
