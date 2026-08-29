@@ -5,7 +5,7 @@ using NNlib
 using CUDA
 using Zygote: ignore_derivatives
 
-export DifuscoGNN
+export AGNN
 
 struct OutputHead
     bn     :: BatchNorm
@@ -18,7 +18,7 @@ OutputHead(d::Int, output_dim::Int) = OutputHead(
     Dense(d, output_dim)
 )
 
-(m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))  # ← was missing
+(m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))
 
 struct AGNNLayer
     U      :: Dense
@@ -63,7 +63,12 @@ function (layer::AGNNLayer)(g::GNNGraph, h::AbstractMatrix, e::AbstractMatrix)
     return h_delta, e_delta
 end
 
-struct DifuscoGNN <: GNN
+"""
+    AGNN <: GNN
+
+Implementation of the Ansiotropic Graph Neural Network proposed by Laurent & Bresson 2018.
+"""
+struct AGNN <: GNN
     config      :: GNNConfig
     feature_dim :: Int
     node_embed  :: Dense
@@ -71,16 +76,16 @@ struct DifuscoGNN <: GNN
     time_layers :: Vector{Chain}
     output_head :: OutputHead
 end
-Flux.@layer DifuscoGNN
+Flux.@layer AGNN
 
-function DifuscoGNN(config::GNNConfig, feature_dim::Int=1)
+function AGNN(config::GNNConfig, feature_dim::Int=1)
     d        = config.hidden_dim
     time_dim = config.in_dim - feature_dim
     L        = config.num_layers
 
     @assert time_dim > 0 "in_dim ($(config.in_dim)) must be > feature_dim ($feature_dim)"
 
-    return DifuscoGNN(
+    return AGNN(
         config,
         feature_dim,
         Dense(feature_dim, d, relu),
@@ -90,7 +95,7 @@ function DifuscoGNN(config::GNNConfig, feature_dim::Int=1)
     )
 end
 
-function (model::DifuscoGNN)(g::GNNGraph, x_input::AbstractMatrix)
+function (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
     fd = model.feature_dim
 
     x_t   = x_input[end-fd+1:end, :]

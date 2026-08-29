@@ -3,6 +3,21 @@ using LinearAlgebra: norm
 
 export ATSSScheduler
 
+"""
+    ATSSScheduler{T} <: Scheduler{T}
+
+Adaptive Time-Step Scheduling (ATSS) strategy.
+Implements a non-uniform time-step scheduler that allocates finer resolution to segments of the flow matching probability path with greater state variation. Corresponds to Algorithm 1 in the EFLOCO paper.
+
+Fields:
+    - 'total_steps': The total number of fine-grained steps used to evaluate the discrete trajectory for integration error.
+    - 'inference_steps': The target number of adaptive steps T to sample during inference.
+    - 'steps': The generated adaptive time-step sequence.
+    - 'κ': The interpolation function.
+    - 'κ̇': The derivative of the interpolation function.
+    - 'atss_p': The exponent p controlling the path weight.
+"""
+
 struct ATSSScheduler{T} <: Scheduler{T}
     total_steps::Int
     inference_steps::Int
@@ -12,7 +27,18 @@ struct ATSSScheduler{T} <: Scheduler{T}
     atss_p::Float32
 end
 
+"""
+    _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32, fine_grid::Vector{Float32}, x_traj::Vector{Matrix{Float32}})
 
+Solves the discrete surrogate integration error objective to find the optimal log-interpolation ratios.
+
+Parameters:
+    - 'T': The target number of adaptive inference steps.
+    - 'κ': The interpolation function.
+    - 'atss_p': The hyperparameter p for the path weight.
+    - 'fine_grid': The fine-grained continuous time grid used for evaluating the trajectory.
+    - 'x_traj': The sequence of state matrices sampled along the fine grid.
+"""
 function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
                                   fine_grid::Vector{Float32}, x_traj::Vector{Matrix{Float32}})
 
@@ -56,6 +82,15 @@ function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
     return best_λ
 end
 
+"""
+    _lambda_inverse(κ::Function, λ::Float32; lo::Float32=0f0, hi::Float32=1f0, tol::Float32=1f-6)
+
+Inverts the log-interpolation ratio to recover the continuous time value via bisection.
+
+Parameters:
+    - 'κ': The interpolation function.
+    - 'λ': The target log-interpolation ratio.
+"""
 function _lambda_inverse(κ::Function, λ::Float32; lo::Float32=0f0, hi::Float32=1f0, tol::Float32=1f-6)
     f(t) = log(max(κ(t), 1f-6) / max(1f0 - κ(t), 1f-6))
     while hi - lo > tol
@@ -69,6 +104,21 @@ function _lambda_inverse(κ::Function, λ::Float32; lo::Float32=0f0, hi::Float32
     return 0.5f0 * (lo + hi)
 end
 
+"""
+    _atss_schedule(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver, T::Int, κ::Function, κ̇::Function, atss_p::Float32, total_steps::Int) where VT
+
+Executes the Adaptive Time-Step Scheduling (ATSS) algorithm to generate the inference time steps.
+
+Parameters:
+    - 'VT': The numeric type of the resulting schedule.
+    - 'generator': The graph generator to sample a source instance.
+    - 'solver': The exact or heuristic solver to provide the target ground-truth solution.
+    - 'T': The desired number of adaptive inference steps.
+    - 'κ': The interpolation function.
+    - 'κ̇': The derivative of the interpolation function.
+    - 'atss_p': The path weight exponent.
+    - 'total_steps': The resolution of the fine-grained trajectory used for cost evaluation.
+"""
 function _atss_schedule(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver,
                          T::Int, κ::Function, κ̇::Function, atss_p::Float32,
                          total_steps::Int) where VT
@@ -133,6 +183,11 @@ function _atss_schedule(::Type{VT}, generator::GraphGenerator, solver::ProblemSo
     return vcat(0f0, t_interior, 1f0)   # line 14: {t_0, t_1, ..., t_T}
 end
 
+"""
+    ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver, total_steps::Int, inference_steps::Int, κ::Function, κ̇::Function; atss_p::Float32=1.0f0) where VT
+
+Constructs an ATSSScheduler.
+"""
 function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver,
                         total_steps::Int, inference_steps::Int,
                         κ::Function, κ̇::Function;
@@ -145,6 +200,7 @@ function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSol
     steps_raw = _atss_schedule(VT, generator, solver, inference_steps, κ, κ̇, atss_p, total_steps)
 
     steps = VT === Int ? round.(Int, clamp.(steps_raw .* total_steps, 1, total_steps)) : steps_raw
+    @debug "Steps from ATSSScheduler: " steps
 
     return ATSSScheduler{VT}(total_steps, inference_steps, steps, κ, κ̇, atss_p)
 end

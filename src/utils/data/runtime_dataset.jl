@@ -19,7 +19,7 @@ end
 """
     RuntimeDataset(num_instances, generator, solver; max_concurrent_solves=2, buffer_capacity=4*max_concurrent_solves)
 
-Dataset that is solved during runtime
+Dataset that is solved during runtime.
 TODO Docs
 """
 function RuntimeDataset(num_instances::Int, generator::G, solver::P;
@@ -35,14 +35,13 @@ function RuntimeDataset(num_instances::Int, generator::G, solver::P;
                     g = generator()
                     x_0 = solver(g)
                     gnn_g = GNNGraph(g, ndata=(; x=x_0))
-                    
-                    # Blocks here if buffer is full — natural backpressure
+                
                     put!(buffer, (normalize_graph(gnn_g), "runtime_inst_$(n).txt"))
                     n += 1
                 catch e
-                    # Ensures the background task doesn't die silently! This happened sometimes at the cluster
+                    # Ensures the background task doesn't die silently! This happened sometimes at the cluster - I don't know if it is an Gurobi issue...
                     @error "Background dataset worker crashed! Logging and resuming..." exception=(e, catch_backtrace())
-                    sleep(1) # Prevent a tight infinite loop if the error is permanent
+                    sleep(1)
                 end
             end
         end

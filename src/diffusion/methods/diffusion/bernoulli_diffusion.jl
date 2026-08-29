@@ -6,23 +6,42 @@ using CUDA
 
 export BernoulliDiffusion
 
+"""
+    BernoulliDiffusion <: Diffusion
+
+Struct to hold parameters for Continuous Diffusion with Bernoulli noise.
+Implements the framework described in Section 3.2 of the DIFUSCO paper.
+"""
 struct BernoulliDiffusion <: Diffusion
     scheduler::Scheduler{Int}
 end
 
+""" get_betas(scheduler::Scheduler)
+
+Gets the corruption ratio values from the assigned scheduler (for each step). Length is dependent on the configured stepsize (total_steps) in the scheduler.
+
+Parameters:
+    - 'scheduler': The scheduler used.
+"""
 function get_betas(scheduler::Scheduler)
     T = scheduler.total_steps
     @debug Float32.(range(1f-4, 2f-2, length=T))
     return Float32.(range(1f-4, 2f-2, length=T))
 end
  
-function get_alphas(diffusion::BernoulliDiffusion)
-    βs = get_betas(diffusion.scheduler)
+""" get_alphas(scheduler::Scheduler)
+
+Gets the cumulative product of the signal scaling factors for the Bernoulli transition matrices. Length is dependent on the configured stepsize (total_steps) in the scheduler.
+
+Parameters:
+    - 'scheduler': The scheduler used.
+"""
+function get_alphas(scheduler::Scheduler)
+    βs = get_betas(scheduler)
     one_minus_2β = 1.0f0 .- 2.0f0 .* βs
     @debug cumprod(one_minus_2β)
     return cumprod(one_minus_2β)
 end
-
 
 """
     q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{Int})
@@ -30,13 +49,13 @@ end
 Describes one forward step (corruption step) in the diffusion process. See page 4 of DIFUSCO paper.
 
 Parameters:
-    - 'diffusion': diffusion method
-    - 'x_0': represents the starting solution without any corruption
-    - 't': represents the timestep which is relevant for the current step. In vector format for parallelization
+    - 'diffusion': The diffusion method.
+    - 'x_0': The starting solution without any corruption.
+    - 't': The timestep which is relevant for the current step. In vector format for parallelization.
 """
 function q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{<:Integer})
     # FIX: Move the alphas to the GPU BEFORE indexing with the GPU array `t`
-    αs = get_alphas(diffusion) |> Flux.gpu
+    αs = get_alphas(diffusion.scheduler) |> Flux.gpu
     ᾱₜ = αs[t]
     
     nd = ndims(x_0)
@@ -51,6 +70,16 @@ function q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{
     return ifelse.(should_flip, flipped, x_0)
 end
 
+"""
+    corrupt_batch(diffusion::BernoulliDiffusion, x_0::AbstractArray, g::GNNGraph)
+
+Executes the forward corruption process q(x_t | x_0) for a batch of graphs.
+
+Parameters:
+    - 'diffusion': The BernoulliDiffusion method.
+    - 'x_0': The target solution.
+    - 'g': The batch of graphs.
+"""
 function corrupt_batch(diffusion::BernoulliDiffusion, x_0::AbstractArray, g::GNNGraph)
     T = diffusion.scheduler.total_steps
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
@@ -69,6 +98,16 @@ function corrupt_batch(diffusion::BernoulliDiffusion, x_0::AbstractArray, g::GNN
     return corrupted_x, t_device, x_0
 end
 
+
+"""
+    calculate_loss(::BernoulliDiffusion, preds::AbstractArray, target::AbstractArray)
+
+Calculate the loss function.
+    
+Parameters:
+    - 'preds': The prediction values.
+    - 'target': The target values.
+"""
 function calculate_loss(::BernoulliDiffusion, preds::AbstractArray, target::AbstractArray)
     return Flux.logitbinarycrossentropy(preds, target)
 end
@@ -80,13 +119,14 @@ end
 Calculate a vector of probabilities for x_t-1 for a given intermediate solution x_t at timestep t. See eq. (5) and (6) in DIFUSCO.
 
 Parameters:
-    - 'diffusion': diffusion method
-    - 'x_t': the intermediate solution which the prediction is based upon
-    - 'x_0_pred': the prediction for x_0 (by the model)
-    - 't
+    - 'diffusion': The diffusion method
+    - 'x_t': The intermediate solution which the prediction is based upon.
+    - 'x_0_pred': The  prediction for x_0 (by the model).
+    - 't': The current timestep.
+    - 's': The previous timestep.
 """
 function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int, s::Int)
-    αs = get_alphas(diffusion)
+    αs = get_alphas(diffusion.scheduler)
     
     ᾱₜ = αs[t:t] |> Flux.gpu
     
@@ -124,11 +164,11 @@ end
 Describes one backward (denoising) step for the diffusion process.
 
 Parameters:
-    - 'diffusion': diffusion method
-    - 'model': the current model
-    - 'x_t': the current diffusion state of x at the timestep t
-    - 't': the timestep
-    - 'g': the graphs
+    - 'diffusion': The diffusion method
+    - 'model': The current model.
+    - 'x_t': The current diffusion state of x at the timestep t.
+    - 't': The timestep.
+    - 'g': The provided graphs.
 """
 function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, s::Int, g::GNNGraph)
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
@@ -148,13 +188,13 @@ end
 """
     sample_heatmap(diffusion::BernoulliDiffusion, model, shape, g)
 
-Represents an inference call and produces a heatmap for the provided input
+Represents an inference call and produces a heatmap for the provided input.
 
     Parameters:
-    - 'diffusion'diffusion method
-    - 'model': the current model
-    - 'shape': shape of the graph
-    - 'g': The input graph which will be predicted
+    - 'diffusion': The diffusion method.
+    - 'model': The current model.
+    - 'shape': The shape of the graph.
+    - 'g': The input graph which will be predicted.
 """
 function sample_heatmap(diffusion::BernoulliDiffusion, model, shape::Tuple, g::GNNGraph; kwargs...)
     x_cpu = Float32.(rand(Float32, shape) .> 0.5f0) 

@@ -5,6 +5,19 @@ using CUDA
 
 export DiscreteFlowMatching
 
+"""
+    DiscreteFlowMatching <: Diffusion
+
+Struct to hold parameters for Discrete Flow Matching.
+Implements the discrete flow matching framework for combinatorial optimization 
+as described in the EFLOCO paper.
+
+Fields:
+    - 'scheduler': The scheduler defining the interpolation steps.
+    - 'λ_cons': hyperparameter balancing the consistency loss.
+    - 'κ': The interpolation function.
+    - 'κ̇': The derivative of the interpolation function.
+"""
 struct DiscreteFlowMatching <: Diffusion
     scheduler::Scheduler{Float32} # scheduler (ATSS used in original paper)
     λ_cons::Float32 # hyperparameter that balances the consistency loss of the loss function (eq. 11)
@@ -12,7 +25,18 @@ struct DiscreteFlowMatching <: Diffusion
     κ̇ ::Function # derivative of κ
 end
 
-#eq 7
+"""
+    uₜ(diffusion::DiscreteFlowMatching, x_t::AbstractArray, p₁ₜ::AbstractArray, t)
+
+Computes the transition tendency or probabilistic velocity field guiding the evolution 
+of the state along the path. Corresponds to Eq. 7 in the EFLOCO paper.
+
+Parameters:
+    - 'diffusion': The flow matching method.
+    - 'x_t': The current intermediate state.
+    - 'p₁ₜ': The model's predicted marginal distribution for the target.
+    - 't': The current timestep.
+"""
 function uₜ(diffusion::DiscreteFlowMatching, x_t::AbstractArray,
                          p₁ₜ::AbstractArray, t)
     κ_t  = diffusion.κ.(t)
@@ -20,22 +44,45 @@ function uₜ(diffusion::DiscreteFlowMatching, x_t::AbstractArray,
     return (κ̇_t ./ max.(1f0 .- κ_t, 1f-6)) .* (p₁ₜ .- x_t)   # eq. 7
 end
 
-function coupled_next_state(diffusion::DiscreteFlowMatching, x_t::AbstractArray,
+"""
+    forward_transition_step(diffusion::DiscreteFlowMatching, x_t::AbstractArray, x_1::AbstractArray, t, t_next)
+
+Determines the next state in the forward probability path between the current state and the target solution
+
+Parameters:
+    - 'diffusion': The flow matching method.
+    - 'x_t': The current state.
+    - 'x_1': The target ground-truth solution.
+    - 't': The current timestep.
+    - 't_next': The next timestep.
+"""
+function forward_transition_step(diffusion::DiscreteFlowMatching, x_t::AbstractArray,
                              x_1::AbstractArray, t, t_next)
     κ      = diffusion.κ.(t)
     κ_next = diffusion.κ.(t_next)
     
-    p_commit = clamp.((κ_next .- κ) ./ max.(1f0 .- κ, 1f-6), 0f0, 1f0)
-
-    already_committed = x_t .== x_1
+    p_commit = clamp.((κ_next .- κ) ./ max.(1f0 .- κ, 1f-6), 0f0, 1f0) # eq. 6 & eq. 7. 
+    
+    already_committed = x_t .== x_1 # eq. 4
     
     r = CUDA.rand(Float32, size(x_t))
     noise = CUDA.rand(Float32, size(x_t))
     fresh_noise = ifelse.(noise .> 0.5f0, 1.0f0, 0.0f0)
 
-    return ifelse.(already_committed .| (r .< p_commit), x_1, fresh_noise)
+    return ifelse.(already_committed .| (r .< p_commit), x_1, fresh_noise) # eq. 6
 end
 
+"""
+    corrupt_batch(diffusion::DiscreteFlowMatching, x_1::AbstractArray, g::GNNGraph)
+
+Executes the forward transition process to generate corrupted states along the 
+flow matching probability path for a batch of graphs.
+
+Parameters:
+    - 'diffusion': The flow matching method.
+    - 'x_1': The target ground-truth solution.
+    - 'g': The batch of GNNGraphs.
+"""
 function corrupt_batch(diffusion::DiscreteFlowMatching, x_1::AbstractArray, g::GNNGraph)
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1 # check for batch size
     T = diffusion.scheduler.total_steps
@@ -53,8 +100,6 @@ function corrupt_batch(diffusion::DiscreteFlowMatching, x_1::AbstractArray, g::G
     τ_nodes = Float32.(t_nodes) ./ Float32(T)
     shp = _time_shape(x_1, length(τ_nodes))
 
-    # was: κ_reshaped = reshape(kappa.(pw, τ_nodes), shp)  — `kappa`/`scheduler_power` don't exist;
-    # use the diffusion's own κ::Function field directly, consistent with uₜ/coupled_next_state
     κ_reshaped = reshape(diffusion.κ.(τ_nodes), shp)
 
     u = CUDA.rand(Float32, size(x_1))
@@ -68,6 +113,20 @@ function corrupt_batch(diffusion::DiscreteFlowMatching, x_1::AbstractArray, g::G
     return corrupted_x, t_device, x_1
 end
 
+"""
+    p(diffusion::DiscreteFlowMatching, model, x_τ::AbstractArray, τ::Real, τ_next::Real, g::GNNGraph)
+
+Executes one step of the reverse generative process by computing the velocity 
+field and performing an Euler integration step. 
+
+Parameters:
+    - 'diffusion': The flow matching method.
+    - 'model': The neural network model predicting the target distribution.
+    - 'x_τ': The current state.
+    - 'τ': The current continuous time value.
+    - 'τ_next': The next continuous time value.
+    - 'g': The graph batch.
+"""
 function p(diffusion::DiscreteFlowMatching, model, x_τ::AbstractArray, τ::Real, τ_next::Real, g::GNNGraph)
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
     T = diffusion.scheduler.total_steps
@@ -84,17 +143,40 @@ function p(diffusion::DiscreteFlowMatching, model, x_τ::AbstractArray, τ::Real
     end
 
     u_τ = uₜ(diffusion, x_τ, p1t_pred, Float32(τ))   # Eq. 7
-    x_next_prob = euler_step(x_τ, u_τ, τ, τ_next)                # Eq. 6
+    x_next_prob = euler_step(x_τ, u_τ, τ, τ_next)   # Eq. 6
 
     noise = CUDA.rand(Float32, size(x_τ))
     return ifelse.(noise .< x_next_prob, 1.0f0, 0.0f0)
 end
 
+"""
+    euler_step(x_t::AbstractArray, u_t::AbstractArray, τ::Real, τ_next::Real)
+
+Performs an Euler integration step to update the state probability distribution 
+using the computed velocity field. Corresponds to Eq. 6 in the EFLOCO paper.
+
+Parameters:
+    - 'x_t': The current state distribution.
+    - 'u_t': The computed velocity field.
+    - 'τ': The current continuous time.
+    - 'τ_next': The next continuous time.
+"""
 function euler_step(x_t::AbstractArray, u_t::AbstractArray, τ::Real, τ_next::Real)
     h = Float32(τ_next - τ)
     return clamp.(x_t .+ h .* u_t, 0f0, 1f0)
 end
 
+"""
+    sample_heatmap(diffusion::DiscreteFlowMatching, model, shape::Tuple, g::GNNGraph; kwargs...)
+
+Represents an inference call and produces a heatmap for the provided input.
+
+Parameters:
+    - 'diffusion': The flow matching method.
+    - 'model': The neural network model.
+    - 'shape': The shape of the required state matrix.
+    - 'g': The input graph instance.
+"""
 function sample_heatmap(diffusion::DiscreteFlowMatching, model, shape::Tuple, g::GNNGraph; kwargs...)
     x_cpu = Float32.(rand(Float32, shape) .> 0.5f0)
     x = Flux.gpu(x_cpu)
@@ -114,32 +196,83 @@ function sample_heatmap(diffusion::DiscreteFlowMatching, model, shape::Tuple, g:
     return Flux.sigmoid.(logits)
 end
 
+"""
+    L_dfm(logits::AbstractArray, x_1::AbstractArray)
+
+Calculates the discrete flow matching objective via logit binary cross-entropy. See eq. 8.
+"""
 function L_dfm(logits::AbstractArray, x_1::AbstractArray)
     return Flux.logitbinarycrossentropy(logits, x_1)
 end
 
+"""
+    L_total(l_dfm, l_cons, λ_cons::Float32)
+
+Calculates the combined total loss aggregating the standard flow matching loss 
+and the velocity-based consistency loss. See eq. 11.
+"""
 function L_total(l_dfm, l_cons, λ_cons::Float32)
     return l_dfm + λ_cons * l_cons
 end
 
+"""
+    L_cons(u_t::AbstractArray, u_t_next::AbstractArray)
+
+Calculates the velocity-based consistency loss penalizing the deviation 
+between the induced next-step distributions from adjacent states. See eq. 10.
+"""
 function L_cons(u_t::AbstractArray, u_t_next::AbstractArray)
     return Flux.mse(u_t, u_t_next)
 end
 
+"""
+    _build_model_input(gnn, x::AbstractArray, timesteps::AbstractVector, gi, time_dim::Int)
+
+Helper function to construct the neural network input matrix by concatenating 
+the state with broadcasted sinusoidal timestep embeddings.
+"""
 function _build_model_input(gnn, x::AbstractArray, timesteps::AbstractVector, gi, time_dim::Int)
     t_emb = Thesis.get_timestep_embedding(timesteps, time_dim)
     t_emb_nodes = isnothing(gi) ? repeat(t_emb, 1, size(x, 2)) : t_emb[:, gi]
     return vcat(t_emb_nodes, x)
 end
 
+"""
+    _nodewise_tau(timesteps::AbstractVector, T::Int, gi, num_nodes::Int, shp)
+
+Helper function to broadcast normalized continuous time values τ to all nodes 
+within their corresponding graphs in the batch.
+"""
 function _nodewise_tau(timesteps::AbstractVector, T::Int, gi, num_nodes::Int, shp)
     τ = Float32.(timesteps) ./ Float32(T)
     τ_nodes = isnothing(gi) ? repeat(τ, num_nodes) : τ[gi]
     return reshape(τ_nodes, shp)
 end
 
+"""
+    _time_shape(x::AbstractArray, n::Int)
+
+Helper function determining the shape for timestep broadcasting based on the 
+dimensionality of the input data matrix.
+"""
 _time_shape(x::AbstractArray, n::Int) = ndims(x) == 2 ? (1, n) : (1, 1, n)
 
+
+"""
+    Thesis.compute_loss_and_gradients(gnn::GNN, method::DiscreteFlowMatching, ...)
+
+Executes the forward and backward passes to compute the total flow matching loss 
+and gradients for the GNN model, explicitly coupling states at adjacent timesteps 
+to calculate the consistency regularization.
+
+Parameters:
+    - 'gnn': The GNN network model.
+    - 'method': The flow matching method.
+    - 'x_t': The generated corrupted state.
+    - 'timesteps': The sampled discrete timesteps.
+    - 'batch': The batch of target GNNGraphs.
+    - 'x_1': The target ground-truth solution.
+"""
 function Thesis.compute_loss_and_gradients(gnn::GNN, method::DiscreteFlowMatching,
                                             x_t::AbstractArray, timesteps::AbstractVector,
                                             batch::GNNGraph, x_1::AbstractArray)
@@ -156,7 +289,7 @@ function Thesis.compute_loss_and_gradients(gnn::GNN, method::DiscreteFlowMatchin
     τ_r      = _nodewise_tau(timesteps, T, gi, size(x_1, 2), shp)
     τ_next_r = _nodewise_tau(timesteps_next, T, gi, size(x_1, 2), shp)
 
-    x_t_next = coupled_next_state(method, x_t, x_1, τ_r, τ_next_r)
+    x_t_next = forward_transition_step(method, x_t, x_1, τ_r, τ_next_r)
     x_input_t_next = _build_model_input(gnn, x_t_next, timesteps_next, gi, time_dim)
 
     # Eq. 11 (total loss = l_dfm + λ_cons * L_cons)
