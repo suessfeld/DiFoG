@@ -77,3 +77,20 @@ function (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
 
     return x_0
 end
+
+"""
+    decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
+
+Naive threshold decoding for MAXCUT: each node is assigned to side 1 if its
+predicted probability exceeds 0.5, and side 0 otherwise. No neighbor-aware
+correction is applied, so the resulting partition is a direct rounding of
+the model's heatmap rather than a locally cut-maximizing greedy assignment.
+
+Parameters:
+    -'g'       : the graph representing the problem instance (unused, kept
+                 for signature consistency with other `decode_heatmap` methods)
+    -'heatmap' : per-node model probability scores p_i ∈ [0,1]
+"""
+function decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
+    return vec(heatmap) .> 0.5f0
+end

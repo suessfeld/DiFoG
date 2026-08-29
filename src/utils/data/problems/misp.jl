@@ -17,7 +17,6 @@ function _init_gurobi_env!()
         end
     end
 
-    # NEW — initialize the single shared env used by NodeSelectionsProblems.jl's ILP!
     try
         GRB_ENV[] = Gurobi.Env()
     catch e
@@ -109,4 +108,50 @@ function (solver::MISPSolver)(g::AbstractGraph)
     end
     
     return x_0
+end
+
+"""
+    decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
+
+Greedy decoding strategy for MISP, as described in Section 3.5 of the
+DIFUSCO paper: nodes are visited in descending order of predicted
+confidence `heatmap[i]`, and greedily added to the independent set whenever
+none of their neighbors are already selected.
+
+Parameters:
+    -'g'       : the graph representing the problem instance
+    -'heatmap' : per-node model confidence scores a_i ∈ [0,1]
+"""
+function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
+    num_nodes = g.num_nodes
+
+    sorted_nodes = sortperm(vec(heatmap), rev=true)   # FIXED — was `a`
+
+    in_set = falses(num_nodes)
+
+    s, t = edge_index(g)
+    adj = [Int[] for _ in 1:num_nodes]
+
+    for i in 1:length(s)
+        push!(adj[s[i]], t[i])
+    end
+
+    for node in sorted_nodes
+        conflict = false
+
+        # check if any neighbor is already in the independent set
+        for neighbor in adj[node]
+            if in_set[neighbor]
+                conflict = true
+                break
+            end
+        end
+
+        # if no neighbors are in the set, it's safe to add this node
+        if !conflict
+            in_set[node] = true
+        end
+    end
+
+    return in_set   # FIXED — added missing closing `end` below
 end

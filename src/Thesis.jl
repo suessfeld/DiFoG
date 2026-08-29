@@ -35,9 +35,7 @@ include("./diffusion/scheduler/linear.jl")
 include("./diffusion/scheduler/cosine.jl")
 include("./diffusion/scheduler/atss.jl")
 
-include("./gnn/models/anisotropic_gnn_basic.jl")
-include("./gnn/models/difusco_gnn.jl")
-
+include("./gnn/models/AGNN.jl")
 
 include("./utils/data/graphs/er.jl")
 include("./utils/data/graphs/basic.jl")
@@ -46,13 +44,14 @@ include("./utils/data/problems/misp.jl")
 include("./utils/data/problems/maxdeg.jl")
 
 abstract type Config end
+
 include("./utils/data/problems/NodeSelectionProblems.jl")
 include("./utils/data/problems/maxcut.jl")
 
 function __init__()
     DotEnv.load!(joinpath(@__DIR__, ".env"))
-    set_log_level!()          # NEW — reads ENV["LOG_LEVEL"], defaults to INFO
-    _init_gurobi_env!()
+    set_log_level!() # for loglevel
+    _init_gurobi_env!() # init gurobi all the way in the beginning, else sometimes there is strange behavior...
     return
 end
 

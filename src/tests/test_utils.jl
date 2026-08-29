@@ -121,7 +121,7 @@ function run_automated_pipeline(;
 
                 heatmap_slice = preds_probs_cpu[1, start_slice:end_slice]
                 heatmap_vec = vec(heatmap_slice)
-                mask_slice = Thesis.greedy_decode_maxcut(graphs[j], heatmap_vec)
+                mask_slice = Thesis.decode_heatmap(test_solver, graphs[j], heatmap_vec)
                 push!(valid_masks_cpu, mask_slice)
 
                 batch_model_score += sum(mask_slice)
@@ -216,7 +216,7 @@ function run_automated_pipeline(;
         for r in 1:num_repeat_inference
             heatmap_r = Thesis.sample_heatmap(model.method, model, shape, g_repeat_gpu)
             heatmap_r_cpu = vec(Flux.cpu(heatmap_r))
-            mask_r = Int.(vec(Thesis.greedy_decode_maxcut(last_test_graph, heatmap_r_cpu)))
+            mask_r = Int.(vec(Thesis.decode_heatmap(test_solver, last_test_graph, heatmap_r_cpu)))
             repeat_masks[r] = mask_r
 
             filepath = joinpath(test_results_dir, "test_instance_$(last_test_instance_idx)_$(r)_result.txt")
