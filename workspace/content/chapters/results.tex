@@ -1,0 +1,655 @@
+\subsection{Results}
+% Auto-generated pipeline report — copy directly into thesis .tex source
+\subsection{Pipeline Run: misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{sec:run-misp-diffusion-er-300-400-6-128-atss}
+
+\subsubsection{Data Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph Generator & ERGraphGenerator \\
+Generator Params & ERGraphGenerator(300, 400, 0.15) \\
+Problem Solver (train) & MISPSolver MISPSolver(0.2) \\
+Problem Solver (test) & MISPSolver MISPSolver(2.0) \\
+Training Instances & 1000 \\
+Testing Instances & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Data configuration for run misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{tab:data-misp-diffusion-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Model Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Method & BernoulliDiffusion \\
+GNN Layers & 6 \\
+GNN Hidden Dim & 128 \\
+Total Parameters & 821633 \\
+Timesteps (T) & 1000 \\
+Inference Steps & 2 \\
+\bottomrule
+\end{tabular}
+\caption{Model configuration for run misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{tab:model-misp-diffusion-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Training Hyperparameters}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Loaded pretrained model & false \\
+Epochs & 10 \\
+Batch Size & 16 \\
+Learning Rate & 0.001 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters for run misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{tab:hyperparams-misp-diffusion-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Results \& Metrics}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Final Training Loss & 0.218914 \\
+Avg Optimal Solution Size & 32.02 \\
+Avg Predicted Solution Size & 27.45 \\
+Approximation Ratio (\textbackslash\{\}\%) & 85.73 \\
+Total Inference Time (s) & 6.7174 \\
+Avg Inference Time / Instance (s) & 0.0672 \\
+\bottomrule
+\end{tabular}
+\caption{Results and performance metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{tab:results-misp-diffusion-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Heatmap Quality}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Avg Mean Binary Entropy \$\textbackslash\{\}bar\{H\}\$ (lower = more decisive) & 0.2533 \\
+Avg Decisiveness Score \$1 - \textbackslash\{\}bar\{H\}/\textbackslash\{\}ln 2\$ (higher = better) & 0.6345 \\
+Avg Greedy Correction Rate & 0.0756 \\
+\bottomrule
+\end{tabular}
+\caption{Heatmap decisiveness and greedy-decoding correction metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{tab:heatmap-misp-diffusion-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Inference Stability}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Repeated Inferences on Last Instance & 100 \\
+Avg Normalized Hamming Distance across repeats & 0.1294 \\
+\bottomrule
+\end{tabular}
+\caption{Repeated-inference stability metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_atss}
+\label{tab:stability-misp-diffusion-er-300-400-6-128-atss}
+\end{table}
+
+% Auto-generated pipeline report — copy directly into thesis .tex source
+\subsection{Pipeline Run: misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{sec:run-misp-diffusion-er-300-400-6-128-cosine}
+
+\subsubsection{Data Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph Generator & ERGraphGenerator \\
+Generator Params & ERGraphGenerator(300, 400, 0.15) \\
+Problem Solver (train) & MISPSolver MISPSolver(0.2) \\
+Problem Solver (test) & MISPSolver MISPSolver(2.0) \\
+Training Instances & 1000 \\
+Testing Instances & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Data configuration for run misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{tab:data-misp-diffusion-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Model Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Method & BernoulliDiffusion \\
+GNN Layers & 6 \\
+GNN Hidden Dim & 128 \\
+Total Parameters & 821633 \\
+Timesteps (T) & 1000 \\
+Inference Steps & 50 \\
+\bottomrule
+\end{tabular}
+\caption{Model configuration for run misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{tab:model-misp-diffusion-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Training Hyperparameters}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Loaded pretrained model & false \\
+Epochs & 10 \\
+Batch Size & 16 \\
+Learning Rate & 0.001 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters for run misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{tab:hyperparams-misp-diffusion-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Results \& Metrics}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Final Training Loss & 0.218996 \\
+Avg Optimal Solution Size & 31.83 \\
+Avg Predicted Solution Size & 27.16 \\
+Approximation Ratio (\textbackslash\{\}\%) & 85.33 \\
+Total Inference Time (s) & 52.0992 \\
+Avg Inference Time / Instance (s) & 0.521 \\
+\bottomrule
+\end{tabular}
+\caption{Results and performance metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{tab:results-misp-diffusion-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Heatmap Quality}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Avg Mean Binary Entropy \$\textbackslash\{\}bar\{H\}\$ (lower = more decisive) & 0.2607 \\
+Avg Decisiveness Score \$1 - \textbackslash\{\}bar\{H\}/\textbackslash\{\}ln 2\$ (higher = better) & 0.6239 \\
+Avg Greedy Correction Rate & 0.0744 \\
+\bottomrule
+\end{tabular}
+\caption{Heatmap decisiveness and greedy-decoding correction metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{tab:heatmap-misp-diffusion-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Inference Stability}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Repeated Inferences on Last Instance & 100 \\
+Avg Normalized Hamming Distance across repeats & 0.147 \\
+\bottomrule
+\end{tabular}
+\caption{Repeated-inference stability metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_cosine}
+\label{tab:stability-misp-diffusion-er-300-400-6-128-cosine}
+\end{table}
+
+% Auto-generated pipeline report — copy directly into thesis .tex source
+\subsection{Pipeline Run: misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{sec:run-misp-diffusion-er-300-400-6-128-linear}
+
+\subsubsection{Data Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph Generator & ERGraphGenerator \\
+Generator Params & ERGraphGenerator(300, 400, 0.15) \\
+Problem Solver (train) & MISPSolver MISPSolver(0.2) \\
+Problem Solver (test) & MISPSolver MISPSolver(2.0) \\
+Training Instances & 1000 \\
+Testing Instances & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Data configuration for run misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{tab:data-misp-diffusion-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Model Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Method & BernoulliDiffusion \\
+GNN Layers & 6 \\
+GNN Hidden Dim & 128 \\
+Total Parameters & 821633 \\
+Timesteps (T) & 1000 \\
+Inference Steps & 50 \\
+\bottomrule
+\end{tabular}
+\caption{Model configuration for run misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{tab:model-misp-diffusion-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Training Hyperparameters}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Loaded pretrained model & false \\
+Epochs & 10 \\
+Batch Size & 16 \\
+Learning Rate & 0.001 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters for run misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{tab:hyperparams-misp-diffusion-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Results \& Metrics}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Final Training Loss & 0.219634 \\
+Avg Optimal Solution Size & 31.83 \\
+Avg Predicted Solution Size & 27.11 \\
+Approximation Ratio (\textbackslash\{\}\%) & 85.17 \\
+Total Inference Time (s) & 53.6219 \\
+Avg Inference Time / Instance (s) & 0.5362 \\
+\bottomrule
+\end{tabular}
+\caption{Results and performance metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{tab:results-misp-diffusion-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Heatmap Quality}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Avg Mean Binary Entropy \$\textbackslash\{\}bar\{H\}\$ (lower = more decisive) & 0.2718 \\
+Avg Decisiveness Score \$1 - \textbackslash\{\}bar\{H\}/\textbackslash\{\}ln 2\$ (higher = better) & 0.6079 \\
+Avg Greedy Correction Rate & 0.0726 \\
+\bottomrule
+\end{tabular}
+\caption{Heatmap decisiveness and greedy-decoding correction metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{tab:heatmap-misp-diffusion-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Inference Stability}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Repeated Inferences on Last Instance & 100 \\
+Avg Normalized Hamming Distance across repeats & 0.1384 \\
+\bottomrule
+\end{tabular}
+\caption{Repeated-inference stability metrics for run misp\_diffusion\_er\_300\_400\_6\_128\_linear}
+\label{tab:stability-misp-diffusion-er-300-400-6-128-linear}
+\end{table}
+
+% Auto-generated pipeline report — copy directly into thesis .tex source
+\subsection{Pipeline Run: misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{sec:run-misp-flow-matching-er-300-400-6-128-atss}
+
+\subsubsection{Data Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph Generator & ERGraphGenerator \\
+Generator Params & ERGraphGenerator(300, 400, 0.15) \\
+Problem Solver (train) & MISPSolver MISPSolver(0.2) \\
+Problem Solver (test) & MISPSolver MISPSolver(2.0) \\
+Training Instances & 1000 \\
+Testing Instances & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Data configuration for run misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{tab:data-misp-flow-matching-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Model Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Method & DiscreteFlowMatching \\
+GNN Layers & 6 \\
+GNN Hidden Dim & 128 \\
+Total Parameters & 821633 \\
+Timesteps (T) & 1000 \\
+Inference Steps & 2 \\
+\bottomrule
+\end{tabular}
+\caption{Model configuration for run misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{tab:model-misp-flow-matching-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Training Hyperparameters}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Loaded pretrained model & false \\
+Epochs & 10 \\
+Batch Size & 8 \\
+Learning Rate & 0.001 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters for run misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{tab:hyperparams-misp-flow-matching-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Results \& Metrics}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Final Training Loss & 2.371135 \\
+Avg Optimal Solution Size & 31.76 \\
+Avg Predicted Solution Size & 26.2 \\
+Approximation Ratio (\textbackslash\{\}\%) & 82.49 \\
+Total Inference Time (s) & 5.2455 \\
+Avg Inference Time / Instance (s) & 0.0525 \\
+\bottomrule
+\end{tabular}
+\caption{Results and performance metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{tab:results-misp-flow-matching-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Heatmap Quality}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Avg Mean Binary Entropy \$\textbackslash\{\}bar\{H\}\$ (lower = more decisive) & 0.3076 \\
+Avg Decisiveness Score \$1 - \textbackslash\{\}bar\{H\}/\textbackslash\{\}ln 2\$ (higher = better) & 0.5562 \\
+Avg Greedy Correction Rate & 0.2153 \\
+\bottomrule
+\end{tabular}
+\caption{Heatmap decisiveness and greedy-decoding correction metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{tab:heatmap-misp-flow-matching-er-300-400-6-128-atss}
+\end{table}
+
+\subsubsection{Inference Stability}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Repeated Inferences on Last Instance & 5 \\
+Avg Normalized Hamming Distance across repeats & 0.1341 \\
+\bottomrule
+\end{tabular}
+\caption{Repeated-inference stability metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_atss}
+\label{tab:stability-misp-flow-matching-er-300-400-6-128-atss}
+\end{table}
+
+% Auto-generated pipeline report — copy directly into thesis .tex source
+\subsection{Pipeline Run: misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{sec:run-misp-flow-matching-er-300-400-6-128-cosine}
+
+\subsubsection{Data Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph Generator & ERGraphGenerator \\
+Generator Params & ERGraphGenerator(300, 400, 0.15) \\
+Problem Solver (train) & MISPSolver MISPSolver(0.2) \\
+Problem Solver (test) & MISPSolver MISPSolver(2.0) \\
+Training Instances & 1000 \\
+Testing Instances & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Data configuration for run misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{tab:data-misp-flow-matching-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Model Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Method & DiscreteFlowMatching \\
+GNN Layers & 6 \\
+GNN Hidden Dim & 128 \\
+Total Parameters & 821633 \\
+Timesteps (T) & 1000 \\
+Inference Steps & 50 \\
+\bottomrule
+\end{tabular}
+\caption{Model configuration for run misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{tab:model-misp-flow-matching-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Training Hyperparameters}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Loaded pretrained model & false \\
+Epochs & 10 \\
+Batch Size & 8 \\
+Learning Rate & 0.001 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters for run misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{tab:hyperparams-misp-flow-matching-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Results \& Metrics}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Final Training Loss & 66.65457 \\
+Avg Optimal Solution Size & 31.76 \\
+Avg Predicted Solution Size & 26.44 \\
+Approximation Ratio (\textbackslash\{\}\%) & 83.25 \\
+Total Inference Time (s) & 51.9213 \\
+Avg Inference Time / Instance (s) & 0.5192 \\
+\bottomrule
+\end{tabular}
+\caption{Results and performance metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{tab:results-misp-flow-matching-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Heatmap Quality}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Avg Mean Binary Entropy \$\textbackslash\{\}bar\{H\}\$ (lower = more decisive) & 0.1873 \\
+Avg Decisiveness Score \$1 - \textbackslash\{\}bar\{H\}/\textbackslash\{\}ln 2\$ (higher = better) & 0.7297 \\
+Avg Greedy Correction Rate & 0.0794 \\
+\bottomrule
+\end{tabular}
+\caption{Heatmap decisiveness and greedy-decoding correction metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{tab:heatmap-misp-flow-matching-er-300-400-6-128-cosine}
+\end{table}
+
+\subsubsection{Inference Stability}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Repeated Inferences on Last Instance & 5 \\
+Avg Normalized Hamming Distance across repeats & 0.1263 \\
+\bottomrule
+\end{tabular}
+\caption{Repeated-inference stability metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_cosine}
+\label{tab:stability-misp-flow-matching-er-300-400-6-128-cosine}
+\end{table}
+
+% Auto-generated pipeline report — copy directly into thesis .tex source
+\subsection{Pipeline Run: misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{sec:run-misp-flow-matching-er-300-400-6-128-linear}
+
+\subsubsection{Data Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph Generator & ERGraphGenerator \\
+Generator Params & ERGraphGenerator(300, 400, 0.15) \\
+Problem Solver (train) & MISPSolver MISPSolver(0.2) \\
+Problem Solver (test) & MISPSolver MISPSolver(2.0) \\
+Training Instances & 1000 \\
+Testing Instances & 100 \\
+\bottomrule
+\end{tabular}
+\caption{Data configuration for run misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{tab:data-misp-flow-matching-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Model Configuration}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Method & DiscreteFlowMatching \\
+GNN Layers & 6 \\
+GNN Hidden Dim & 128 \\
+Total Parameters & 821633 \\
+Timesteps (T) & 1000 \\
+Inference Steps & 50 \\
+\bottomrule
+\end{tabular}
+\caption{Model configuration for run misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{tab:model-misp-flow-matching-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Training Hyperparameters}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Loaded pretrained model & false \\
+Epochs & 10 \\
+Batch Size & 8 \\
+Learning Rate & 0.001 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters for run misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{tab:hyperparams-misp-flow-matching-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Results \& Metrics}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Final Training Loss & 8.97004 \\
+Avg Optimal Solution Size & 31.93 \\
+Avg Predicted Solution Size & 24.9 \\
+Approximation Ratio (\textbackslash\{\}\%) & 77.98 \\
+Total Inference Time (s) & 52.7687 \\
+Avg Inference Time / Instance (s) & 0.5277 \\
+\bottomrule
+\end{tabular}
+\caption{Results and performance metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{tab:results-misp-flow-matching-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Heatmap Quality}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Avg Mean Binary Entropy \$\textbackslash\{\}bar\{H\}\$ (lower = more decisive) & 0.1539 \\
+Avg Decisiveness Score \$1 - \textbackslash\{\}bar\{H\}/\textbackslash\{\}ln 2\$ (higher = better) & 0.778 \\
+Avg Greedy Correction Rate & 0.1193 \\
+\bottomrule
+\end{tabular}
+\caption{Heatmap decisiveness and greedy-decoding correction metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{tab:heatmap-misp-flow-matching-er-300-400-6-128-linear}
+\end{table}
+
+\subsubsection{Inference Stability}
+\begin{table}[h!]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Repeated Inferences on Last Instance & 5 \\
+Avg Normalized Hamming Distance across repeats & 0.1117 \\
+\bottomrule
+\end{tabular}
+\caption{Repeated-inference stability metrics for run misp\_flow\_matching\_er\_300\_400\_6\_128\_linear}
+\label{tab:stability-misp-flow-matching-er-300-400-6-128-linear}
+\end{table}
+

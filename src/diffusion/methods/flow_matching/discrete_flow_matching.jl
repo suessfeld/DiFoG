@@ -9,7 +9,7 @@ struct DiscreteFlowMatching <: Diffusion
     scheduler::Scheduler{Float32} # scheduler (ATSS used in original paper)
     λ_cons::Float32 # hyperparameter that balances the consistency loss of the loss function (eq. 11)
     κ::Function # interpolation function of the scheduler
-    κ̇ ::Function # derivatibe of κ
+    κ̇ ::Function # derivative of κ
 end
 
 #eq 7
@@ -104,7 +104,7 @@ function sample_heatmap(diffusion::DiscreteFlowMatching, model, shape::Tuple, g:
     @info "Scheduler State" (; (f => getfield(diffusion.scheduler, f) for f in fieldnames(typeof(diffusion.scheduler)))...)
     for τ_step in diffusion.scheduler
         x = p(diffusion, model, x, τ_current, τ_step, g)
-        τ_current = τ_step   # was: τ_current = τ_prev  (undefined variable)
+        τ_current = τ_step
     end
 
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
