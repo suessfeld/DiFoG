@@ -41,7 +41,8 @@ function uₜ(diffusion::DiscreteFlowMatching, x_t::AbstractArray,
                          p₁ₜ::AbstractArray, t)
     κ_t  = diffusion.κ.(t)
     κ̇_t  = diffusion.κ̇.(t)
-    return (κ̇_t ./ max.(1f0 .- κ_t, 1f-6)) .* (p₁ₜ .- x_t)   # eq. 7
+    velocity_scale = clamp.(κ̇_t ./ max.(1f0 .- κ_t, 1f-6), -1f2, 1f2)  # bound the coefficient, to avoid explosion! This is not explicitly mentioned in the paper, but ATSS pushes steps towards 1, which results in extreme values.
+    return velocity_scale .* (p₁ₜ .- x_t)   # eq. 7
 end
 
 """
