@@ -2,6 +2,9 @@ using Graphs
 
 export ERGraphGenerator
 
+"""
+An Erdős–Rényi graph generator. It generates ER graphs with the specified parameters.
+"""
 struct ERGraphGenerator <: GraphGenerator
     min_nodes::Int
     max_nodes::Int

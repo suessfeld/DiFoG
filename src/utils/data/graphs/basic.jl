@@ -3,6 +3,9 @@ using Random
 
 export BasicGraphGenerator
 
+"""
+A basic graph generator that generates according to the defined ranged of nodes and edges.
+"""
 struct BasicGraphGenerator <: GraphGenerator
     min_nodes::Int
     max_nodes::Int
@@ -10,7 +13,6 @@ struct BasicGraphGenerator <: GraphGenerator
     max_edges::Int
 end
 
-# Keyword constructor with defaults
 function BasicGraphGenerator(; min_nodes::Int=50, max_nodes::Int=100, min_edges::Int=200, max_edges::Int=300)
     return BasicGraphGenerator(min_nodes, max_nodes, min_edges, max_edges)
 end

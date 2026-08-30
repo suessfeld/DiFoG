@@ -1,4 +1,3 @@
-# src/utils/data/runtime_dataset.jl
 using Flux
 using GraphNeuralNetworks
 using Graphs
@@ -6,9 +5,19 @@ using .DataUtils: normalize_graph
 
 export RuntimeDataset, GraphGenerator, ProblemSolver
 
+"""
+Wrapper for a generic graph generator.
+"""
 abstract type GraphGenerator end
+
+"""
+Wrapper for a generic problem solver. Must implement a solver and a heatmap decoder.
+"""
 abstract type ProblemSolver end
 
+"""
+Dataset that is solved during runtime. It uses the generator to create instances on-the-fly in an asynchron manner and solves them with the provided solver. A buffer keeps solved instances so they can be provided in batches without any wait (if possible).
+"""
 struct RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
     num_instances::Int
     generator::G
@@ -19,8 +28,14 @@ end
 """
     RuntimeDataset(num_instances, generator, solver; max_concurrent_solves=2, buffer_capacity=4*max_concurrent_solves)
 
-Dataset that is solved during runtime.
-TODO Docs
+Constructor of a RuntimeDataset.
+
+Parameters:
+    - 'num_instances': The number of instances in the set.
+    - 'generator': The generator that is used for generating instances.
+    - 'solver': The solver that is used for solving the generated instances.
+    - 'max_concurrent_solves': The maximum solvers that are available. For Gurobi academic usage this is 2.
+    - 'buffer_capacity': Defines the buffer size that is kept in the dataset. Defaults to 3 times the solver capacity.
 """
 function RuntimeDataset(num_instances::Int, generator::G, solver::P;
                          max_concurrent_solves::Int=2,

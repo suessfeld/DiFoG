@@ -3,6 +3,9 @@ using JuMP
 
 export MaxCutSolver
 
+"""
+A solver that solves the Maximum Cut Problem with the usage of Gurobi.
+"""
 struct MaxCutSolver <: ProblemSolver
     time_limit::Float64
 end
@@ -81,15 +84,11 @@ end
 """
     decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
 
-Naive threshold decoding for MAXCUT: each node is assigned to side 1 if its
-predicted probability exceeds 0.5, and side 0 otherwise. No neighbor-aware
-correction is applied, so the resulting partition is a direct rounding of
-the model's heatmap rather than a locally cut-maximizing greedy assignment.
+Simple decoding strategy for maxcut. Divides the set into two subsets, one set includes all values p > 0.5, the other one p < 0.5.
 
 Parameters:
-    -'g'       : the graph representing the problem instance (unused, kept
-                 for signature consistency with other `decode_heatmap` methods)
-    -'heatmap' : per-node model probability scores p_i ∈ [0,1]
+    - 'g': The graph representing the problem instance (unused, kept for signature consistency with other `decode_heatmap` methods).
+    - 'heatmap': The predicted heatmap.
 """
 function decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
     return vec(heatmap) .> 0.5f0

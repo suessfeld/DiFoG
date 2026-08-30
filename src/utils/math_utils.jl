@@ -7,7 +7,7 @@ using CUDA
 Converts an adjacency list to a 2xE edge matrix.
 
 Parameters:
-    -'adj_list': the adjacency list to transform
+    - 'adj_list': The adjacency list to transform.
 """
 function adjacency_list_to_matrix(adj_list::Vector{Vector{Int}})
     src = Int[]

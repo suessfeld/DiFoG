@@ -5,7 +5,25 @@ using Dates
 using Statistics
 using Base.Iterators: partition
 
-# ... run_inference_and_save / run_inference_greedy_and_save unchanged ...
+"""
+    run_automated_pipeline(;run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),model::DiffusionModel,generator::GraphGenerator,solver::ProblemSolver,num_train::Int = 1000,num_test::Int = 100,epochs::Int = 5,batch_size::Int = 16,learning_rate::Float64 = 1e-3,workers::Int = 12,test_time_limit::Float64 = 2.0,num_repeat_inference::Int = 5
+
+A helper function that runs a training and test run, then evaluates the models and saves the results.
+    
+Parameters:
+    - 'run_id': The id of this run. Defaults to this timestamp. Before training it is checked whether a model with the provided run_id is already saved, which will be loaded.
+    - 'model': The model that should be trained and tested.
+    - 'generator': The used graph generator.
+    - 'solver': The solver that solves the problem.
+    - 'num_train': The number of training instances.
+    - 'num_test': The number of testing instances.
+    - 'epochs': The amount of epochs that will be trained for.
+    - 'batch_size': The batch size that will be used during training and testing.
+    - 'learning_rate': The learning rate used for the training
+    - 'workers': The number of workes used for solving the instances.
+    - 'test_time_limit': The timelimit for the solver during the testing stage.
+    - 'num_repeat_inference': The amount of inferences that will be done on the last instance. This is to analye the behavior of inferencing on the same instance multiple times.
+"""
 
 function run_automated_pipeline(;
     run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),
@@ -19,7 +37,7 @@ function run_automated_pipeline(;
     learning_rate::Float64 = 1e-3,
     workers::Int = 12,
     test_time_limit::Float64 = 2.0,
-    num_repeat_inference::Int = 5,   # NEW — how many times the LAST test instance is re-inferred for stability
+    num_repeat_inference::Int = 5
 )
     @info "=== Starting Pipeline Run: $run_id ==="
 
@@ -68,12 +86,10 @@ function run_automated_pipeline(;
     total_graphs = 0
     total_inference_time = 0.0
 
-    # NEW — heatmap-quality accumulators
     total_confidence = 0.0      # decisiveness (1 - H̄/ln2), higher = more decisive
     total_entropy = 0.0         # raw mean binary entropy H̄
     total_correction_rate = 0.0 # fraction of nodes flipped by greedy decoding vs naive threshold
 
-    # NEW — tracks the very last (graph, name) processed, for repeated-inference stability test
     last_test_graph = nothing
     last_test_instance_idx = 0
 
@@ -142,8 +158,7 @@ function run_automated_pipeline(;
             total_true_score += Float64(sum(true_mask))
             total_graphs += batch_size_actual
 
-            # NEW — remember the last graph/index of this batch (overwritten each batch;
-            # after the loop this is the true LAST test instance)
+
             last_test_graph = graphs[end]
             last_test_instance_idx = global_test_idx - 1
 
@@ -182,12 +197,12 @@ function run_automated_pipeline(;
         end
     end
 
+    # generic evaluation parameters
     avg_model_score = total_model_score / total_graphs
     avg_true_score = total_true_score / total_graphs
     performance_pct = (avg_model_score / avg_true_score) * 100
     avg_inference_time_per_instance = total_inference_time / total_graphs
 
-    # NEW — averages over all test instances
     avg_confidence = total_confidence / total_graphs
     avg_entropy = total_entropy / total_graphs
     avg_correction_rate = total_correction_rate / total_graphs
@@ -195,11 +210,6 @@ function run_automated_pipeline(;
     @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Optimal Score: $(round(avg_true_score, digits=2)) | Performance: $(round(performance_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
     @info "Heatmap Quality | Avg Decisiveness: $(round(avg_confidence, digits=4)) (H̄=$(round(avg_entropy, digits=4))) | Avg Greedy Correction Rate: $(round(avg_correction_rate, digits=4))"
 
-    # ============================================================
-    # NEW — Hamming-distance stability test: re-infer the LAST test
-    # instance `num_repeat_inference` times and measure heatmap/
-    # decoded-mask variance across independent reverse-diffusion runs.
-    # ============================================================
     avg_hamming_stability = NaN
     if num_repeat_inference > 1 && !isnothing(last_test_graph)
         @info "Running $(num_repeat_inference) repeated inferences on instance $(last_test_instance_idx) for stability measurement..."
@@ -259,6 +269,8 @@ function run_automated_pipeline(;
 
     label_base = replace(run_id, r"[^A-Za-z0-9]" => "-")
 
+
+    # output directly in latex tables
     open(filepath, "w") do io
         println(io, "% Auto-generated pipeline report — copy directly into thesis .tex source")
         println(io, "\\subsection{Pipeline Run: $(latex_escape(run_id))}")
@@ -310,7 +322,7 @@ function run_automated_pipeline(;
         # ---- Heatmap Quality ----
         println(io, "\\subsubsection{Heatmap Quality}")
         write_latex_kv_table(io, [
-            ("Avg Mean Binary Entropy \$\\bar{H}\$ (lower = more decisive)", string(round(avg_entropy, digits=4))),
+            ("Avg Deviation from 0.5 \$\\bar{H}\$ (lower = more decisive)", string(round(avg_entropy, digits=4))),
             ("Avg Decisiveness Score \$1 - \\bar{H}/\\ln 2\$ (higher = better)", string(round(avg_confidence, digits=4))),
             ("Avg Greedy Correction Rate", string(round(avg_correction_rate, digits=4))),
         ]; caption="Heatmap decisiveness and greedy-decoding correction metrics for run $(run_id)", label="tab:heatmap-$(label_base)")
@@ -336,10 +348,6 @@ function run_automated_pipeline(;
     return filepath
 end
 
-# ============================================================
-# LaTeX report helpers
-# ============================================================
-
 """
     latex_escape(s)
 
@@ -362,9 +370,7 @@ end
 """
     write_latex_kv_table(io, rows; caption=nothing, label=nothing)
 
-Writes a simple two-column `Parameter | Value` LaTeX table from
-`rows::Vector{Tuple{String,String}}`. Values are escaped; pass pre-escaped
-strings if you need raw LaTeX (e.g. already-escaped math).
+Writes a simple two-column `Parameter | Value` LaTeX table.
 """
 function write_latex_kv_table(io, rows::Vector{<:Tuple}; caption=nothing, label=nothing)
     println(io, "\\begin{table}[h!]")

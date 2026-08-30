@@ -15,8 +15,8 @@ end
 Constructor
 
 Parameters:
-    -'g': a graph(batch)
-    -'x': a feature matrix
+    - 'g': A graph(batch).
+    - 'x': A feature matrix.
 """
 
 function (model::DiffusionModel)(g::GNNGraph, x_t::AbstractMatrix)
@@ -36,8 +36,8 @@ _embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
 Defines a forward pass (callable for Flux) of the network.
 
 Parameters:
-    -'x_t': current state of the solution
-    -'g': a graph(batch)
+    - 'x_t': The current state of the solution.
+    - 'g': A graph(batch).
 """
 function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer}, g::GNNGraph)
     x_dim    = size(x_t, 1)
@@ -53,13 +53,13 @@ end
 """
     train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
 
-Main training loop for the diffusion model.
+Main training loop for a diffusion model.
 
 Parameters:
-    -'model': the model to train
-    -'optim': the optimizer
-    -'data_loader': dataloader which loads training data lazily
-    -'epochs': the epochs to train for
+    - 'model': The model to train.
+    - 'optim': The optimizer.
+    - 'data_loader': The dataloader which loads training data lazily.
+    - 'epochs': The epochs to train for.
 """
 function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
     loss_history = Float32[]
@@ -81,7 +81,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
 
             wait_time = time() - t_start_wait
             
-            # If the wait time is longer than 50ms, log a starvation warning
+            # If the wait time is longer than 50ms, log a starvation warning. This helps with understanding the performance between CPU and GPU!
             if wait_time > 0.01
                 @debug "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
             end
@@ -121,8 +121,8 @@ end
 Inference call to the trained model. Moves the entire batch to the GPU and processes the inference there.
 
 Parameters:
-    -'model': the model which will be infered
-    -'batch': the batch of graphs which will be passed for inference
+    - 'model': The model which will be infered.
+    - 'batch': The batch of graphs which will be passed for inference.
 """
 function infer(model::DiffusionModel, batch::GNNGraph)
     g_gpu = batch |> Flux.gpu
@@ -131,7 +131,9 @@ function infer(model::DiffusionModel, batch::GNNGraph)
     return heatmap_gpu |> Flux.cpu
 end
 
-
+"""
+Needed to ensure Zygote is not evaluating thunks unnecessarily often. It forces a one-time materialization so the result can be reused.
+"""
 _mat(g::AbstractThunk)    = unthunk(g)
 _mat(g::NamedTuple)       = map(_mat, g)
 _mat(g::Tuple)            = map(_mat, g)
@@ -174,9 +176,9 @@ end
 Generates sinusoidal time embeddings.
 
 Parameters:
-    -'timesteps': vector of integers (T,)
-    -'embedding_dim': output dimension (D,)
-    -'max_period': max period
+    - 'timesteps': The vector of integers (T,)
+    - 'embedding_dim': The output dimension (D,)
+    - 'max_period': The maximum period used.
 """
 function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
     half = div(embedding_dim, 2)

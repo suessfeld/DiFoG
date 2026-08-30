@@ -4,6 +4,14 @@ using Gurobi
 
 export MISPSolver
 
+"""
+A solver that solves the Maximum Independent Set Problem with the usage of Gurobi.
+"""
+struct MISPSolver <: ProblemSolver
+    time_limit::Float64
+end
+
+
 const NUM_GUROBI_LICENSES = 2 
 const GRB_ENV_POOL = Channel{Gurobi.Env}(NUM_GUROBI_LICENSES)
 const GRB_ENV = Ref{Gurobi.Env}()
@@ -23,10 +31,6 @@ function _init_gurobi_env!()
         @error "Failed to initialize shared Gurobi Environment (GRB_ENV) for NodeSelectionsProblems.jl" exception=e
     end
     return
-end
-
-struct MISPSolver <: ProblemSolver
-    time_limit::Float64
 end
 
 MISPSolver(; time_limit::Float64=0.5) = MISPSolver(time_limit)
@@ -119,13 +123,13 @@ confidence `heatmap[i]`, and greedily added to the independent set whenever
 none of their neighbors are already selected.
 
 Parameters:
-    -'g'       : the graph representing the problem instance
-    -'heatmap' : per-node model confidence scores a_i ∈ [0,1]
+    - 'g': The graph representing the problem instance.
+    - 'heatmap': The per-node model confidence scores a_i ∈ [0,1].
 """
 function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
     num_nodes = g.num_nodes
 
-    sorted_nodes = sortperm(vec(heatmap), rev=true)   # FIXED — was `a`
+    sorted_nodes = sortperm(vec(heatmap), rev=true)
 
     in_set = falses(num_nodes)
 
@@ -153,5 +157,5 @@ function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
         end
     end
 
-    return in_set   # FIXED — added missing closing `end` below
+    return in_set
 end
