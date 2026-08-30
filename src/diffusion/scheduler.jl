@@ -9,6 +9,7 @@ abstract type Scheduler{T} end
 
 Base.length(s::Scheduler) = max(0, length(s.steps) - 1)
 Base.collect(s::Scheduler) = s.steps # use collect to just get the entire step vector
+Base.eltype(::Type{<:Scheduler{T}}) where T = T # Just added for correct typing - does not really have an impact
 
 # Iterator
 function Base.iterate(s::Scheduler, state=length(s.steps) - 1)

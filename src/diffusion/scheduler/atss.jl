@@ -72,6 +72,12 @@ function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
             trial = copy(best_t_interior)
             trial[j] = c
             sort!(trial)
+            
+            # Constraint: Enforce strict monotonicity to prevent identical timesteps. Does not correspond to the paper, however tests showcased that sometimes duplicate timesteps resulted (especially for the INT version) which should not happen in my opinion.
+            if length(unique(trial)) < length(trial)
+                continue
+            end
+            
             c_cost, c_λ = cost_and_lambda(trial)
             if c_cost < best_cost
                 best_cost, best_λ, best_t_interior = c_cost, c_λ, trial

@@ -86,9 +86,9 @@ function run_automated_pipeline(;
     total_graphs = 0
     total_inference_time = 0.0
 
-    total_confidence = 0.0      # decisiveness (1 - H̄/ln2), higher = more decisive
-    total_entropy = 0.0         # raw mean binary entropy H̄
-    total_correction_rate = 0.0 # fraction of nodes flipped by greedy decoding vs naive threshold
+    total_confidence = 0.0
+    total_entropy = 0.0
+    total_correction_rate = 0.0
 
     last_test_graph = nothing
     last_test_instance_idx = 0

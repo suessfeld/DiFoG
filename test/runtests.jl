@@ -1,4 +1,6 @@
 using TestItemRunner
+using Thesis
+using DotEnv
 
 DotEnv.load!(joinpath(pkgdir(Thesis), "src", ".env"))
 

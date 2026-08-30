@@ -36,7 +36,6 @@ include("./diffusion/scheduler/cosine.jl")
 include("./diffusion/scheduler/atss.jl")
 
 include("./gnn/models/AGNN.jl")
-
 include("./utils/data/graphs/er.jl")
 include("./utils/data/graphs/basic.jl")
 

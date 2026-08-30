@@ -35,8 +35,9 @@ Parameters:
 """
 function heatmap_decisiveness(p::AbstractArray)
     deviation = @. abs(2.0f0 * Float32(p) - 1.0f0)
-    mean_deviation = mean(deviation)
-    return mean_deviation, mean_deviation
+    confidence = mean(deviation)
+    pseudo_entropy = 1.0f0 - confidence
+    return pseudo_entropy, confidence
 end
 
 """
