@@ -36,7 +36,7 @@ function run_automated_pipeline(;
     batch_size::Int = 16,
     learning_rate::Float64 = 1e-3,
     workers::Int = 12,
-    test_time_limit::Float64 = 2.0,
+    test_time_limit::Float64 = 5.0,
     num_repeat_inference::Int = 5
 )
     @info "=== Starting Pipeline Run: $run_id ==="
@@ -47,7 +47,7 @@ function run_automated_pipeline(;
 
     model_already_exists = isfile(model_path)
 
-    test_solver = solver isa MISPSolver ? MISPSolver(time_limit=test_time_limit) : solver
+    test_solver = solver isa MISPSolver ? MISPSolver(time_limit=test_time_limit) : MaxCutSolver(time_limit=test_time_limit) # temporary, needs better solution
 
     final_train_loss = NaN
 
@@ -124,11 +124,12 @@ function run_automated_pipeline(;
             batch_num += 1
             @info "Batch $(batch_num) [$(total_graphs + batch_size_actual) instances total] | Total: $(round(batch_inference_time, digits=4))s | Per instance: $(round(avg_time_per_instance, digits=4))s"
 
-            true_mask = target_x0 .> 0.5f0
+            true_mask_cpu = Flux.cpu(target_x0) .> 0.5f0
             preds_probs_cpu = Flux.cpu(preds_probs)
 
             valid_masks_cpu = Vector{Vector{Int}}()
             batch_model_score = 0.0
+            batch_true_score = 0.0
 
             start_slice = 1
             for j in 1:length(graphs)
@@ -140,7 +141,8 @@ function run_automated_pipeline(;
                 mask_slice = Thesis.decode_heatmap(test_solver, graphs[j], heatmap_vec)
                 push!(valid_masks_cpu, mask_slice)
 
-                batch_model_score += sum(mask_slice)
+                batch_model_score += Thesis.evaluate(test_solver, graphs[j], mask_slice)
+                batch_true_score  += Thesis.evaluate(test_solver, graphs[j], vec(true_mask_cpu[1, start_slice:end_slice]))
 
                 # NEW — heatmap decisiveness (mean binary entropy → confidence score)
                 mean_entropy, confidence = Thesis.heatmap_decisiveness(heatmap_vec)
@@ -155,7 +157,7 @@ function run_automated_pipeline(;
             end
 
             total_model_score += batch_model_score
-            total_true_score += Float64(sum(true_mask))
+            total_true_score += batch_true_score
             total_graphs += batch_size_actual
 
 

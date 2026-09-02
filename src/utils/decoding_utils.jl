@@ -11,6 +11,12 @@ A generic function that must be overridden by the specific ProblemSolvers to dec
 function decode_heatmap end
 
 """
+    evaluate
+
+A generic function that must be overidden by the specific ProblemSolver to evaluate problems.
+"""
+function evaluate end
+"""
     hamming_distance(a::AbstractArray, b::AbstractArray)
 
 Elementwise Hamming distance between two equal-shaped (binary or boolean) arrays.

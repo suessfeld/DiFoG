@@ -25,7 +25,6 @@ include("./utils/model_utils.jl")
 include("./utils/decoding_utils.jl")
 
 include("./diffusion/methods/diffusion/bernoulli_diffusion.jl")
-include("./diffusion/methods/diffusion/gaussian_diffusion.jl")
 include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
 
 include("./utils/data/data_utils.jl")

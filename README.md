@@ -110,7 +110,7 @@ using Flux
 using Thesis
 
 # Training and pipeline helpers are outside of the package!
-include(joinpath(pkgdir(Thesis), "src", "tests", "test_utils.jl"))
+include(joinpath(pkgdir(Thesis), "test", "test_utils.jl"))
 
 function main()
     # `run_id` is derived from the script's own filename. 

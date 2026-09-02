@@ -93,3 +93,20 @@ Parameters:
 function decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
     return vec(heatmap) .> 0.5f0
 end
+
+"""
+    evaluate(::MaxCutSolver, g::GNNGraph, mask::AbstractVector)
+
+MAXCUT objective: |{(u,v) ∈ E : mask[u] ≠ mask[v]}|, i.e. the number of edges
+crossing the cut induced by `mask`. `edge_index(g)` stores each undirected
+edge twice (once per direction), hence the `÷ 2`.
+"""
+function evaluate(::MaxCutSolver, g::GNNGraph, mask::AbstractVector)
+    s, t = edge_index(g)
+    selected = Bool.(vec(mask))
+    cut = 0
+    @inbounds for i in eachindex(s)
+        cut += selected[s[i]] != selected[t[i]] ? 1 : 0
+    end
+    return Float64(cut ÷ 2)
+end

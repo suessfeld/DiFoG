@@ -159,3 +159,12 @@ function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
 
     return in_set
 end
+
+"""
+    evaluate(::MISPSolver, g::GNNGraph, mask::AbstractVector)
+
+MISP objective: cardinality of the selected (independent) set, i.e. Σᵢ maskᵢ.
+"""
+function evaluate(::MISPSolver, g::GNNGraph, mask::AbstractVector)
+    return Float64(sum(mask))
+end
