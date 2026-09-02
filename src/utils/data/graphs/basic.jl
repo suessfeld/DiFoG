@@ -3,6 +3,8 @@ using Random
 
 export BasicGraphGenerator
 
+#GR Please use just the single graph generators provided in NodeSelectionProblems.jl
+
 """
 A basic graph generator that generates according to the defined ranged of nodes and edges.
 """

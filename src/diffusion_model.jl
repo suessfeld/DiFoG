@@ -3,6 +3,8 @@ export DiffusionModel
 
 """
 Represents a Diffusionmodel consisting of a general, a diffusion method and a scheduler. 
+
+#GR TODO A general? Bitte auch konsistent bei allen struct-Kommentaren in der ersten Zeile den Namen des structs einrücken, sodass das Kommentar auch gefunden werden kann.
 """
 struct DiffusionModel{G<:GNN, M<:Diffusion}
     gnn::G
@@ -14,11 +16,12 @@ end
 
 Constructor
 
+#GR TODO Nein, das ist kein Constructor, zumindest nicht im Julia-Sinn.
+
 Parameters:
     - 'g': A graph(batch).
     - 'x': A feature matrix.
 """
-
 function (model::DiffusionModel)(g::GNNGraph, x_t::AbstractMatrix)
     return model.gnn(g, x_t)
 end

@@ -1,10 +1,3 @@
-using Graphs
-using JuMP
-using Gurobi
-using MHLib
-using Random
-using StatsBase: sample
-
 # NodeSelectionProblems.jl
 #
 # Combinatorial optimization problems where a subset of the nodes in a graph is selected.
@@ -26,6 +19,13 @@ using StatsBase: sample
 # - Densest k-subgraph problem (DkS)
 #   Given an undirected (weighted) graph and an integer k, find a subset of k nodes
 #   that maximizes the number of edges in the induced subgraph.
+
+using Graphs
+using JuMP
+using Gurobi
+using MHLib
+using Random
+using StatsBase: sample
 
 
 export NodeSelectionProblem, NSPInstance, NSPSolution,

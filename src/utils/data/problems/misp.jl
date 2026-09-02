@@ -4,6 +4,7 @@ using Gurobi
 
 export MISPSolver
 
+#GR TODO: Das Lösen des MISP über Gurobi ist doch auch in NodeSelectin Problems.jl implementiert. Warum brauchen wir diese Parallelstruktur? Zumindest sollten die Gründe dokumentiert werden und ggfs. kann dann die Gurobi-Logik aus NodeSelectionProblems.jl entfernt werden.
 """
 A solver that solves the Maximum Independent Set Problem with the usage of Gurobi.
 """

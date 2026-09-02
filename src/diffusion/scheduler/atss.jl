@@ -17,7 +17,6 @@ Fields:
     - 'κ̇': The derivative of the interpolation function.
     - 'atss_p': The exponent p controlling the path weight.
 """
-
 struct ATSSScheduler{T} <: Scheduler{T}
     total_steps::Int
     inference_steps::Int

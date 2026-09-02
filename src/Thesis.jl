@@ -1,4 +1,4 @@
-module Thesis
+module Thesis  #GR final sollten wir hier ein hübsches Acronym für das Framework haben
 
 using CUDA
 using Flux
@@ -8,7 +8,7 @@ using DotEnv
 using Logging
 using MHLib
 
-DotEnv.load!(joinpath(@__DIR__, ".env"))
+DotEnv.load!(joinpath(@__DIR__, ".env"))  #GR TODO: Besser anders lösen, z.B. in Ihrem .profile, hier keine User-abhängigen Pfade
 
 include("./utils/logging_utils.jl")
 
@@ -25,7 +25,7 @@ include("./utils/model_utils.jl")
 include("./utils/decoding_utils.jl")
 
 include("./diffusion/methods/diffusion/bernoulli_diffusion.jl")
-include("./diffusion/methods/diffusion/gaussian_diffusion.jl")
+include("./diffusion/methods/diffusion/gaussian_diffusion.jl")  #GR TODO Does not exist!!
 include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
 
 include("./utils/data/data_utils.jl")
@@ -36,6 +36,10 @@ include("./diffusion/scheduler/cosine.jl")
 include("./diffusion/scheduler/atss.jl")
 
 include("./gnn/models/AGNN.jl")
+
+#GR TODO Bitte nur die Graphgeneratoren in NodeSelectionProblems.jl verwenden, keine "doppelte" Funktionalität.
+
+#GR TODO Es ist unintuitiv, dass problems (und graphs) in einem Unterverzeichnis data liegen, ich würde NodeSelection Problems.jl entweder einfach in src legen oder in src/problems.
 include("./utils/data/graphs/er.jl")
 include("./utils/data/graphs/basic.jl")
 

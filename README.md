@@ -1,6 +1,6 @@
 # Thesis.jl
 
-A Julia framework for solving Combinatorial Optimization Problems (COPs) like the Maximum Independet Set (MIS) or Maximum Cut (MaxCut) problem on graphs with **generative diffusion models built on Graph Neural Networks**. It implements the discrete
+A Julia framework for solving Combinatorial Optimization Problems (COPs) like the Maximum Independent Set (MIS) or Maximum Cut (MaxCut) problem on graphs with **generative diffusion models built on Graph Neural Networks**. It implements the discrete
 Bernoulli diffusion framework proposed by Sun et al. in **DIFUSCO** and the discrete flow matching framework **EFLOCO**, implemented by Wang et al., both driven by an anisotropic GNN denoiser and a family of pluggable timestep schedulers (linear, cosine, Adaptive Time-step Scheduling Strategy (ATSS)).
 
 The package is built on `Flux.jl` and `GraphNeuralNetworks.jl`, and is
@@ -12,14 +12,17 @@ threads while the GPU trains on previous batches.
 
 ## Table of Contents
 
-- [Core Concepts](#core-concepts)
-- [Module Structure](#module-structure)
-- [Usage](#usage)
-  - [Example Pipeline Usage](#example-pipeline-usage)
-  - [Outputs](#outputs)
-  - [Loading a previously trained model](#loading-a-previously-trained-model)
-- [Extending the framework](#extending-the-framework)
-- [Testing](#testing)
+- [Thesis.jl](#thesisjl)
+  - [Table of Contents](#table-of-contents)
+  - [Core Concepts](#core-concepts)
+  - [Module Structure](#module-structure)
+  - [Usage](#usage)
+    - [Example Pipeline Usage](#example-pipeline-usage)
+    - [Running a pipeline](#running-a-pipeline)
+    - [Outputs](#outputs)
+    - [Loading a previously trained model](#loading-a-previously-trained-model)
+  - [Extending the framework](#extending-the-framework)
+  - [Testing](#testing)
 
 ---
 

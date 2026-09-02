@@ -1,3 +1,5 @@
+#GR TODO Warum diese Parallelstruktur zu NodeSelectionProblems.jl? Gilt auch für MaxCut.jl.
+
 using Graphs
 
 export MaxDegSolver

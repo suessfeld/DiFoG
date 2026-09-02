@@ -1,3 +1,7 @@
+#GR TODO Bitte jedes Sourcefile immer mit einem Kommentar beginnen, das erklärt worum es hier insgesamt geht.
+
+
+
 using Flux
 using GraphNeuralNetworks
 using Graphs
@@ -16,6 +20,8 @@ Wrapper for a generic problem solver. Must implement a solver and a heatmap deco
 abstract type ProblemSolver end
 
 """
+#GR TODO Bitte bei allen Kommentaren zu structs, Typen etc. auch immer den Namen eingerückt als erste Zeile, sodass das Kommentar entsprechend gefunden werden kann.
+
 Dataset that is solved during runtime. It uses the generator to create instances on-the-fly in an asynchron manner and solves them with the provided solver. A buffer keeps solved instances so they can be provided in batches without any wait (if possible).
 """
 struct RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
