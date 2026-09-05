@@ -4,11 +4,9 @@ using CUDA
 using Flux
 using GraphNeuralNetworks
 using Statistics
-using DotEnv
 using Logging
 using MHLib
 
-DotEnv.load!(joinpath(@__DIR__, ".env"))
 
 include("./utils/logging_utils.jl")
 
@@ -47,7 +45,6 @@ include("./problems/NodeSelectionProblems.jl")
 include("./problems/maxcut.jl")
 
 function __init__()
-    DotEnv.load!(joinpath(@__DIR__, ".env"))
     set_log_level!() # for loglevel
     _init_gurobi_env!() # init gurobi all the way in the beginning, else sometimes there is strange behavior...
     return
