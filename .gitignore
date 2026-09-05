@@ -31,6 +31,8 @@ workspace/indent.log
 /data
 
 src/tests/cases/cluster/*
+/models
+/test/pipelines
 
 /.vscode
 gurobi.lic

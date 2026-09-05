@@ -35,16 +35,16 @@ include("./diffusion/scheduler/cosine.jl")
 include("./diffusion/scheduler/atss.jl")
 
 include("./gnn/models/AGNN.jl")
-include("./utils/data/graphs/er.jl")
-include("./utils/data/graphs/basic.jl")
+include("./graphs/er.jl")
+include("./graphs/basic.jl")
 
-include("./utils/data/problems/misp.jl")
-include("./utils/data/problems/maxdeg.jl")
+include("./problems/misp.jl")
+include("./problems/maxdeg.jl")
 
 abstract type Config end
 
-include("./utils/data/problems/NodeSelectionProblems.jl")
-include("./utils/data/problems/maxcut.jl")
+include("./problems/NodeSelectionProblems.jl")
+include("./problems/maxcut.jl")
 
 function __init__()
     DotEnv.load!(joinpath(@__DIR__, ".env"))
