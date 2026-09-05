@@ -1,10 +1,3 @@
-using Graphs
-using JuMP
-using Gurobi
-using MHLib
-using Random
-using StatsBase: sample
-
 # NodeSelectionProblems.jl
 #
 # Combinatorial optimization problems where a subset of the nodes in a graph is selected.
@@ -31,7 +24,7 @@ using StatsBase: sample
 export NodeSelectionProblem, NSPInstance, NSPSolution,
     MIS, MaxDeg, MCP, MAXCUT, DkS,
     check, construct!, local_improve!, shaking!, baseline_destroy!, random_repair!, 
-    ILP!, get_problem
+    ILP!, get_problem, generate_er_graph
 
 
 """
@@ -139,6 +132,24 @@ function NSPInstance(config::Union{Config, NamedTuple}, rng::Union{AbstractRNG, 
         throw(ArgumentError("Invalid graph type $(config.graph_type)"))
     end
     return RBGraphInstance(problem, n, params, rng)
+end
+
+"""
+    generate_er_graph(n::Int, p::Float64; rng::Union{Nothing,Random.AbstractRNG}=nothing)
+
+Generates a bare Erdős–Rényi graph G(n, p). This is the single source of truth
+for ER generation; both `ERGraphInstance` (NSP path) and `ERGraphGenerator`
+(`GraphGenerator` path) delegate here to avoid duplicated `erdos_renyi` calls.
+
+Parameters:
+    - 'n': Number of nodes.
+    - 'p': Edge probability.
+    - 'rng': Optional RNG, forwarded to `Graphs.erdos_renyi` as-is (it natively
+      accepts `Union{Nothing,AbstractRNG}`, so no `nothing`-handling shim is needed).
+"""
+function generate_er_graph(n::Int, p::Float64; rng::Union{Nothing,Random.AbstractRNG}=nothing)
+    g = erdos_renyi(n, p; rng)
+    return nv(g) == 0 ? SimpleGraph(n) : g   # safety net for degenerate n
 end
 
 """
@@ -432,7 +443,7 @@ function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing;
         obj_limit::Union{Nothing,Real}=nothing,
         warn_time_limit::Bool=true,
         env::Gurobi.Env=GRB_ENV[]) where P <: NodeSelectionProblem   # NEW — env kwarg
-
+        
     @assert P ∈ (MIS, MCP, MAXCUT, DkS)
     n = inst.n
     t_start = time()
@@ -442,7 +453,7 @@ function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing;
 
     if isnothing(inst.ilp_model[])
         # construct ILP model   
-        inst.ilp_model[] = model = Model(() -> Gurobi.Optimizer(env))
+        inst.ilp_model[] = model = Model(() -> Gurobi.Optimizer(GRB_ENV[]))
         silent ? set_silent(model) : unset_silent(model)
         set_time_limit_sec(model, time_limit)
         @variable(model, x[1:n], Bin)
