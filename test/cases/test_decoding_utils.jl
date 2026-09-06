@@ -25,15 +25,31 @@ end
 end
 
 @testitem "Test heatmap_decisiveness fully decisive heatmap" setup=[TestDecodingUtils] begin
-    # p → {0,1} everywhere should give entropy → 0 and confidence → 1
+    # p → {0,1} everywhere should give pseudo_entropy → 0 and confidence → 1
     p = Float32[1e-7, 1.0f0 - 1f-7, 1e-7, 1.0f0 - 1f-7]
-    mean_entropy, confidence = heatmap_decisiveness(p)
+    pseudo_entropy, confidence = heatmap_decisiveness(p)
 
-    @test mean_entropy < 1f-4
+    @test pseudo_entropy < 1f-4
     @test confidence > 0.999f0
 end
 
-@testitem "Test heatmap_decisiveness bounds and clamping" setup=[TestDecodingUtils] begin
+@testitem "Test heatmap_decisiveness exact values at p=0.5 (max uncertainty)" setup=[TestDecodingUtils] begin
+    # heatmap_decisiveness computes D̄ = mean(|2p - 1|) (NOT Shannon entropy —
+    # see the docstring in decoding_utils.jl). At p=0.5, |2*0.5 - 1| = 0 for
+    # every element, so deviation/confidence = 0 exactly, and
+    # pseudo_entropy = 1 - confidence = 1.0 exactly. This is the metric's
+    # least-decisive extreme (opposite convention from true entropy, where
+    # p=0.5 is the *maximum*-entropy point — here it's the minimum-confidence
+    # point, which happens to map to pseudo_entropy=1 rather than ln(2)).
+    p = Float32[0.5f0, 0.5f0, 0.5f0]
+    pseudo_entropy, confidence = heatmap_decisiveness(p)
+
+    @test pseudo_entropy ≈ 1.0f0 atol=1f-6
+    @test confidence ≈ 0.0f0 atol=1f-6
+end
+
+@testitem "Test heatmap_decisiveness bounds and clamping at 0 and 1" setup=[TestDecodingUtils] begin
+    # Values at exactly 0 and 1 must not produce NaN/Inf.
     p = Float32[0.0f0, 1.0f0, 0.5f0]
     pseudo_entropy, confidence = heatmap_decisiveness(p)
 
@@ -41,17 +57,6 @@ end
     @test isfinite(confidence)
     @test 0.0f0 <= confidence <= 1.0f0
     @test 0.0f0 <= pseudo_entropy <= 1.0f0
-end
-
-@testitem "Test heatmap_decisiveness bounds and clamping" setup=[TestDecodingUtils] begin
-    # Values at exactly 0 and 1 must not produce NaN/Inf due to eps clamping
-    p = Float32[0.0f0, 1.0f0, 0.5f0]
-    mean_entropy, confidence = heatmap_decisiveness(p)
-
-    @test isfinite(mean_entropy)
-    @test isfinite(confidence)
-    @test 0.0f0 <= confidence <= 1.0f0
-    @test 0.0f0 <= mean_entropy <= Float32(log(2))
 end
 
 @testitem "Test correction_distance with no corrections needed" setup=[TestDecodingUtils] begin

@@ -3,6 +3,7 @@
 # Implements a cosine denoising schedule to control the noise ratios during the forward and reverse diffusion processes.
 
 export CosineScheduler
+using Functors
 
 """
     CosineScheduler{T} <: Scheduler{T}
@@ -19,6 +20,8 @@ struct CosineScheduler{T} <: Scheduler{T}
     inference_steps::Int
     steps::Vector{T}
 end
+
+Functors.@leaf CosineScheduler
 
 CosineScheduler(total_steps::Int, inference_steps::Int) = CosineScheduler(Int, total_steps, inference_steps)
 
@@ -60,7 +63,3 @@ end
 
 Base.convert(::Type{Scheduler{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)
 Base.convert(::Type{CosineScheduler{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)
-
-function CosineScheduler(total_steps::Int, inference_steps::Int, steps::AbstractVector{T}) where T
-    return CosineScheduler{T}(total_steps, inference_steps, Array(steps))
-end

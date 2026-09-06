@@ -3,6 +3,7 @@
 # Implements a linear denoising schedule to control the noise ratios during the forward and reverse diffusion processes.
 
 export LinearScheduler
+using Functors
 
 """
     LinearScheduler{T} <: Scheduler{T}
@@ -19,6 +20,8 @@ struct LinearScheduler{T} <: Scheduler{T}
     inference_steps::Int
     steps::Vector{T}
 end
+
+Functors.@leaf LinearScheduler
 
 LinearScheduler(total_steps::Int, inference_steps::Int) = LinearScheduler(Int, total_steps, inference_steps)
 
@@ -60,8 +63,3 @@ end
 
 Base.convert(::Type{Scheduler{T}}, s::LinearScheduler) where {T} = LinearScheduler(T, s.total_steps, s.inference_steps)
 Base.convert(::Type{LinearScheduler{T}}, s::LinearScheduler) where {T} = LinearScheduler(T, s.total_steps, s.inference_steps)
-
-# Catch GPU arrays during Flux.gpu traversal and force them back to the CPU
-function LinearScheduler(total_steps::Int, inference_steps::Int, steps::AbstractVector{T}) where T
-    return LinearScheduler{T}(total_steps, inference_steps, Array(steps))
-end

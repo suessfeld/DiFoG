@@ -3,6 +3,7 @@
 # Configuration struct defining the hyperparameters and dimensionalities (layers, input/hidden/output dims) for the GNN models.
 
 export GNNConfig
+using Functors
 
 """
     GNNConfig
@@ -15,6 +16,8 @@ struct GNNConfig
     hidden_dim::Int
     output_dim::Int
 end
+
+Functors.@leaf GNNConfig
 
 function GNNConfig(; num_layers, in_dim, hidden_dim, output_dim)
     return GNNConfig(num_layers, in_dim, hidden_dim, output_dim)

@@ -12,7 +12,7 @@ end
     T = 100
     scheduler = LinearScheduler(Float32, T, T)
     
-    # Simple linear interpolation for the probability path[cite: 4]
+    # Simple linear interpolation for the probability path
     κ(t) = t
     κ̇(t) = 1.0f0
     dfm = DiscreteFlowMatching(scheduler, 1.0f0, κ, κ̇)
@@ -25,9 +25,9 @@ end
     u_val = Thesis.uₜ(dfm, x_t, p1t, t) |> Flux.cpu
     
     # ---------------------------------------------------------
-    # Deterministic Ground Truth Calculation (Eq 7)[cite: 4]
+    # Deterministic Ground Truth Calculation (Eq 7)
     # ---------------------------------------------------------
-    # u_t = (κ̇_t / (1.0 - κ_t)) * (p1t - x_t)[cite: 4]
+    # u_t = (κ̇_t / (1.0 - κ_t)) * (p1t - x_t)
     # At t = 0.5: (1.0 / (1.0 - 0.5)) = 2.0
     expected_u = 2.0f0 .* ( (p1t |> Flux.cpu) .- (x_t |> Flux.cpu) )
     
@@ -45,8 +45,10 @@ end
     κ̇(t) = 1.0f0
     dfm = DiscreteFlowMatching(scheduler, 1.0f0, κ, κ̇)
 
-    # 1. Setup a massive tensor to allow the Law of Large Numbers to converge
-    N = 5000
+    # 1. N=500 (250,000 samples) is plenty for the Law of Large Numbers to
+    # converge here (see the identical note in test_diffusion.jl) — at ~1% of
+    # the GPU memory the previous N=5000 (25M elements) used.
+    N = 500
     
     # x_1 is the target solution (all 1s for testing)
     x_1 = ones(Float32, N, N) |> Flux.gpu
@@ -61,13 +63,13 @@ end
     x_next = Thesis.forward_transition_step(dfm, x_t, x_1, t, t_next) |> Flux.cpu
     
     # ---------------------------------------------------------
-    # Theoretical Expected Distribution[cite: 4]
+    # Theoretical Expected Distribution
     # ---------------------------------------------------------
     # Probability of an uncommitted node permanently committing to the target x_1 
     # over the interval [t, t_next] is given by (κ(t_next) - κ(t)) / (1 - κ(t))
     p_commit = (0.5f0 - 0.2f0) / (1.0f0 - 0.2f0) # 0.375
     
-    # Nodes that do not commit (1 - p_commit) are replaced with uniform noise (0.5 prob of matching 1)[cite: 4]
+    # Nodes that do not commit (1 - p_commit) are replaced with uniform noise (0.5 prob of matching 1)
     expected_prob_1 = p_commit + (1.0f0 - p_commit) * 0.5f0 # 0.375 + 0.3125 = 0.6875
     
     # ---------------------------------------------------------
@@ -80,7 +82,7 @@ end
     
     @test size(x_next) == (N, N)
     
-    # Ensure it only produces valid categorical {0, 1} states required for discrete trajectories[cite: 4]
+    # Ensure it only produces valid categorical {0, 1} states required for discrete trajectories
     @test all(x -> x == 0.0f0 || x == 1.0f0, x_next)
     
     # Assert the sampled distribution matches the paper's theoretical equation within a strict tolerance
@@ -91,11 +93,11 @@ end
     using Flux
     
     # ---------------------------------------------------------
-    # Deterministic Bounds Check (Eq 6 Context)[cite: 4]
+    # Deterministic Bounds Check (Eq 6 Context)
     # ---------------------------------------------------------
     x_t = Float32[0.8 0.2; 0.1 0.9] |> Flux.gpu
     
-    # Provide strong velocities designed to push the probability state out of [0, 1] bounds[cite: 4]
+    # Provide strong velocities designed to push the probability state out of [0, 1] bounds
     u_t = Float32[1.0 -1.0; -0.5 0.5] |> Flux.gpu
     
     τ = 0.2f0

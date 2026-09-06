@@ -17,8 +17,11 @@ end
     scheduler = LinearScheduler(Int, total_steps, inference_steps)
     diffusion = BernoulliDiffusion(scheduler)
 
-    # 1. Setup a massive tensor to allow the Law of Large Numbers to converge
-    N = 5000
+    # 1. N=500 (250,000 samples) is plenty for the Law of Large Numbers to
+    # converge here: worst-case standard error at p≈0.5 is sqrt(0.25/250000)
+    # ≈ 0.001, a 5x margin inside the atol=5e-3 assertion below, at ~1% of
+    # the GPU memory the previous N=5000 (25M elements) used.
+    N = 500
     # Initialize completely with 1s so we can easily track the keep vs flip ratio
     x_0 = ones(Float32, N, N) |> Flux.gpu
     
@@ -29,13 +32,13 @@ end
     q_sampled = Thesis.q(diffusion, x_0, t) |> Flux.cpu
 
     # ---------------------------------------------------------
-    # Theoretical Ground Truth Transition Probability[cite: 3]
+    # Theoretical Ground Truth Transition Probability
     # ---------------------------------------------------------
     βs = Float32.(range(1f-4, 2f-2, length=total_steps))
     αs = cumprod(1.0f0 .- 2.0f0 .* βs)
     ᾱₜ = αs[t_val]
     
-    # The theoretical probability of a bit keeping its original state[cite: 3]
+    # The theoretical probability of a bit keeping its original state
     expected_prob_keep = 0.5f0 * (1.0f0 + ᾱₜ)
 
     # ---------------------------------------------------------
@@ -50,7 +53,7 @@ end
     @test size(q_sampled) == (N, N)
     @test eltype(q_sampled) == Float32
     
-    # Ensure it only produces valid categorical {0, 1} states[cite: 3]
+    # Ensure it only produces valid categorical {0, 1} states
     @test all(x -> x == 0.0f0 || x == 1.0f0, q_sampled)
     
     # Assert the sampled distribution matches the paper's theoretical equation within a 0.5% tolerance
@@ -77,7 +80,7 @@ end
     βs = Float32.(range(1f-4, 2f-2, length=total_steps))
     αs = cumprod(1.0f0 .- 2.0f0 .* βs)
     
-    # Extract cumulative scaling factors \bar{\alpha}_t and \bar{\alpha}_s[cite: 3]
+    # Extract cumulative scaling factors \bar{\alpha}_t and \bar{\alpha}_s
     α_bar_t = αs[t_idx]
     α_bar_s = αs[s_idx]
     α_t_s = α_bar_t / α_bar_s
@@ -98,15 +101,15 @@ end
             # q(x_t | x_{t-1} = 1)
             term1 = xt_val == 1.0f0 ? p_t_s : (1.0f0 - p_t_s)
             
-            # Eq 5 evaluated for x_0 = 1: q(x_{t-1}=1 | x_t, x_0=1)[cite: 3]
+            # Eq 5 evaluated for x_0 = 1: q(x_{t-1}=1 | x_t, x_0=1)
             denom_1 = xt_val == 1.0f0 ? 0.5f0 * (1.0f0 + α_bar_t) : 0.5f0 * (1.0f0 - α_bar_t)
             term2 = (term1 * 0.5f0 * (1.0f0 + α_bar_s)) / denom_1
             
-            # Eq 5 evaluated for x_0 = 0: q(x_{t-1}=1 | x_t, x_0=0)[cite: 3]
+            # Eq 5 evaluated for x_0 = 0: q(x_{t-1}=1 | x_t, x_0=0)
             denom_0 = xt_val == 1.0f0 ? 0.5f0 * (1.0f0 - α_bar_t) : 0.5f0 * (1.0f0 + α_bar_t)
             term3 = (term1 * 0.5f0 * (1.0f0 - α_bar_s)) / denom_0
             
-            # Eq 6: p_θ(x_{t-1}=1 | x_t)[cite: 3]
+            # Eq 6: p_θ(x_{t-1}=1 | x_t)
             expected[i, j] = clamp(x0_pred_val * term2 + (1.0f0 - x0_pred_val) * term3, 0.0f0, 1.0f0)
         end
     end

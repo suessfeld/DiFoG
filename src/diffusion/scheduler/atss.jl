@@ -4,6 +4,7 @@
 # dynamically allocating fine-grained integration steps based on state variations.
 
 using LinearAlgebra: norm
+using Functors
 
 export ATSSScheduler
 
@@ -29,6 +30,8 @@ struct ATSSScheduler{T} <: Scheduler{T}
     κ̇::Function
     atss_p::Float32
 end
+
+Functors.@leaf ATSSScheduler
 
 """
     _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32, fine_grid::Vector{Float32}, x_traj::Vector{Matrix{Float32}})
@@ -114,23 +117,21 @@ function _lambda_inverse(κ::Function, λ::Float32; lo::Float32=0f0, hi::Float32
 end
 
 """
-    _atss_schedule(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver, T::Int, κ::Function, κ̇::Function, atss_p::Float32, total_steps::Int) where VT
+    _atss_schedule(generator::GraphGenerator, solver::ProblemSolver, T::Int, κ::Function, atss_p::Float32, total_steps::Int)
 
 Executes the Adaptive Time-Step Scheduling (ATSS) algorithm to generate the inference time steps.
 
 Parameters:
-    - 'VT': The numeric type of the resulting schedule.
     - 'generator': The graph generator to sample a source instance.
     - 'solver': The exact or heuristic solver to provide the target ground-truth solution.
     - 'T': The desired number of adaptive inference steps.
     - 'κ': The interpolation function.
-    - 'κ̇': The derivative of the interpolation function.
     - 'atss_p': The path weight exponent.
     - 'total_steps': The resolution of the fine-grained trajectory used for cost evaluation.
 """
-function _atss_schedule(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver,
-                         T::Int, κ::Function, κ̇::Function, atss_p::Float32,
-                         total_steps::Int) where VT
+function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
+                         T::Int, κ::Function, atss_p::Float32,
+                         total_steps::Int)
 
     t_grid = Vector{Float32}(undef, total_steps + 1)   # line 1 (fine substrate, resolution total_steps)
     t_grid[1] = 0f0                          # line 1: t_0 = 0
@@ -162,26 +163,6 @@ function _atss_schedule(::Type{VT}, generator::GraphGenerator, solver::ProblemSo
         x_traj[i + 1] = ifelse.(committed, x_1, fresh_noise)
     end
 
-    ε̃ = Vector{Float32}(undef, total_steps)   # ε̃[i] = ε̃_{t_i}
-    λ  = Vector{Float32}(undef, total_steps)   # λ[i]  = λ_{t_i}, Eq. 12
-    L  = Vector{Float32}(undef, total_steps)   # L[i]  = L_i, Eq. 14
-    Δ = Vector{Float32}(undef, total_steps)
-
-    for i in 1:total_steps   # line 5
-        t_i = t_grid[i + 1]
-
-        Δ[i] = norm(vec(x_traj[i + 1]) .- vec(x_traj[i])) # line 6
-
-        α_ti = κ(t_i)                      # α_t := κ(t)
-        σ_ti = 1f0 - κ(t_i)                # σ_t := 1-κ(t)
-
-        ε̃[i] = σ_ti^atss_p / max(α_ti, 1f-6) #line 7
-
-        λ[i] = log(max(α_ti, 1f-6) / max(σ_ti, 1f-6)) #eq 12
-
-        L[i] = ε̃[i] * exp(λ[i]) * Δ[i] #line 8/ eq.14
-    end
-
     λ_interior = _minimize_atss_schedule(T, κ, atss_p, t_grid, x_traj) # line 10
 
     t_interior = Vector{Float32}(undef, T - 1)
@@ -206,7 +187,7 @@ function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSol
         error("ATSSScheduler only supports Scheduler{Int} or Scheduler{Float32}; got $VT")
     end
 
-    steps_raw = _atss_schedule(VT, generator, solver, inference_steps, κ, κ̇, atss_p, total_steps)
+    steps_raw = _atss_schedule(generator, solver, inference_steps, κ, atss_p, total_steps)
 
     steps = VT === Int ? round.(Int, clamp.(steps_raw .* total_steps, 0, total_steps)) : steps_raw
     @debug "Steps from ATSSScheduler: " steps
@@ -229,11 +210,6 @@ end
 function ATSSScheduler(::Type{Float32}, s::ATSSScheduler{Int})
     steps = Float32.(s.steps) ./ Float32(s.total_steps)
     return ATSSScheduler{Float32}(s.total_steps, s.inference_steps, steps, s.κ, s.κ̇, s.atss_p)
-end
-
-function ATSSScheduler(total_steps::Int, inference_steps::Int, steps::AbstractVector{T},
-                        κ::Function, κ̇::Function, atss_p::Float32) where T
-    return ATSSScheduler{T}(total_steps, inference_steps, Array(steps), κ, κ̇, atss_p)
 end
 
 Base.convert(::Type{Scheduler{VT}}, s::ATSSScheduler) where {VT} = ATSSScheduler(VT, s)

@@ -8,6 +8,7 @@ using Statistics
 using Random
 using NNlib
 using CUDA
+using Functors
 
 export BernoulliDiffusion
 
@@ -20,6 +21,8 @@ Implements the framework described in Section 3.2 of the DIFUSCO paper.
 struct BernoulliDiffusion <: Diffusion
     scheduler::Scheduler{Int}
 end
+
+Functors.@leaf BernoulliDiffusion
 
 """
     get_betas(scheduler::Scheduler)
@@ -121,7 +124,7 @@ end
 
 
 """
-    posterior_prob(diff::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int)
+    posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_pred::AbstractArray, t::Int, s::Int)
 
 Calculate a vector of probabilities for x_t-1 for a given intermediate solution x_t at timestep t. See eq. (5) and (6) in DIFUSCO.
 
@@ -166,7 +169,7 @@ function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_p
 end
 
 """
-    p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, g)
+    p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, s::Int, g::GNNGraph)
 
 Describes one backward (denoising) step for the diffusion process.
 
@@ -174,7 +177,8 @@ Parameters:
     - 'diffusion': The diffusion method
     - 'model': The current model.
     - 'x_t': The current diffusion state of x at the timestep t.
-    - 't': The timestep.
+    - 't': The current timestep.
+    - 's': The previous (target) timestep for this denoising step.
     - 'g': The provided graphs.
 """
 function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, s::Int, g::GNNGraph)

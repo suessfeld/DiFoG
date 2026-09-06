@@ -27,7 +27,3 @@ function Base.iterate(r::Iterators.Reverse{<:Scheduler}, state::Int=length(r.itr
     return (r.itr.steps[state], state - 1)
 end
 Base.length(r::Iterators.Reverse{<:Scheduler}) = length(r.itr.steps)
-
-function get_steps(s::Scheduler{T}) where T
-    return s.steps
-end
