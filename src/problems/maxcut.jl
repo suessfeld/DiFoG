@@ -91,6 +91,7 @@ function (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
                         recovered_env = Gurobi.Env()
                         put!(GRB_ENV_POOL, recovered_env)
                     catch second_e
+                        @error "MaxCutSolver: Gurobi license slot permanently lost — pool now has one fewer usable environment." exception=second_e
                     end
                 end
             end

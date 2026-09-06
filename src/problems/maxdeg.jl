@@ -48,3 +48,15 @@ function decode_heatmap(::MaxDegSolver, g::GNNGraph, heatmap::AbstractVector)
 
     return mask
 end
+
+"""
+    evaluate(::MaxDegSolver, g::GNNGraph, mask::AbstractVector)
+
+MaxDeg objective: Σᵢ degree(i) for i ∈ selected set, matching
+`MHLib.calc_objective(sol::NSPSolution{MaxDeg})`.
+"""
+function evaluate(::MaxDegSolver, g::GNNGraph, mask::AbstractVector)
+    degs = degree(g)
+    selected = Bool.(vec(mask))
+    return Float64(sum(degs[selected]; init=0))
+end

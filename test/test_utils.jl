@@ -47,7 +47,15 @@ function run_automated_pipeline(;
 
     model_already_exists = isfile(model_path)
 
-    test_solver = solver isa MISPSolver ? MISPSolver(time_limit=test_time_limit) : MaxCutSolver(time_limit=test_time_limit) # temporary, needs better solution
+    test_solver = if solver isa MISPSolver
+        MISPSolver(time_limit=test_time_limit)
+    elseif solver isa MaxCutSolver
+        MaxCutSolver(time_limit=test_time_limit)
+    elseif solver isa MaxDegSolver
+        solver
+    else
+        error("run_automated_pipeline: no test_solver mapping defined for $(typeof(solver))")
+    end
 
     final_train_loss = NaN
 
@@ -74,7 +82,7 @@ function run_automated_pipeline(;
         final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
     end
 
-    num_params = sum(length, Flux.params(model.gnn))
+    num_params = sum(length, Flux.trainables(model.gnn))
 
     @info "Initializing Test dataset (Gurobi time limit: $(test_time_limit)s)..."
     test_dataset = RuntimeDataset(num_test, generator, test_solver; max_concurrent_solves=workers)
@@ -338,14 +346,6 @@ function run_automated_pipeline(;
     end
 
     @info "LaTeX report saved to $filepath"
-
-    if !model_already_exists
-        @info "Saving trained model weights..."
-        Thesis.save_model(model, model_path)
-        @info "Model successfully saved to $model_path"
-    else
-        @info "Skipped saving — model was loaded from disk, weights unchanged."
-    end
 
     return filepath
 end

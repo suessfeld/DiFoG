@@ -23,7 +23,7 @@ end
 Flux.@layer OutputHead
 
 OutputHead(d::Int, output_dim::Int) = OutputHead(
-    BatchNorm(d, track_stats=false),
+    BatchNorm(d),
     Dense(d, output_dim)
 )
 
@@ -57,8 +57,8 @@ AGNNLayer(d::Int) = AGNNLayer(
     Dense(d, d),
     Dense(d, d),
     Dense(d, d),
-    BatchNorm(d, track_stats=false),
-    BatchNorm(d, track_stats=false),
+    BatchNorm(d),
+    BatchNorm(d),
     Chain(Dense(d, d, relu), Dense(d, d)),
 )
 
@@ -136,24 +136,42 @@ edge update), and returns per-node output logits.
 """
 function (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
     fd = model.feature_dim
-
     x_t   = x_input[end-fd+1:end, :]
     t_emb = x_input[1:end-fd, :]
 
     h = model.node_embed(x_t)
-
     e = ignore_derivatives() do
         CUDA.zeros(Float32, model.config.hidden_dim, g.num_edges)
     end
 
     s, _ = edge_index(g)
-    t_emb_edges = t_emb[:, s]
+
+    gi = g.graph_indicator
+    B  = hasproperty(g, :num_graphs) ? g.num_graphs : 1
+
+    graph_repr_node = ignore_derivatives() do
+        gi_cpu = Array(gi)::Vector{Int}
+        reps = Vector{Int}(undef, B)
+        @inbounds for gid in 1:B
+            reps[gid] = searchsortedfirst(gi_cpu, gid)
+        end
+        reps
+    end
+    t_emb_graphs = t_emb[:, graph_repr_node]
+
+    edge_graph_id = ignore_derivatives() do
+        gi[s]
+    end
 
     for i in eachindex(model.layers)
         h_in, e_in = h, e
         h_delta, e_delta = model.layers[i](g, h, e)
+
+        t_proj_graphs = model.time_layers[i](t_emb_graphs)
+        t_proj_edges  = t_proj_graphs[:, edge_graph_id]
+
         h = h_in .+ h_delta
-        e = e_in .+ e_delta .+ model.time_layers[i](t_emb_edges)
+        e = e_in .+ e_delta .+ t_proj_edges
     end
 
     return model.output_head(h)

@@ -208,7 +208,7 @@ function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSol
 
     steps_raw = _atss_schedule(VT, generator, solver, inference_steps, κ, κ̇, atss_p, total_steps)
 
-    steps = VT === Int ? round.(Int, clamp.(steps_raw .* total_steps, 1, total_steps)) : steps_raw
+    steps = VT === Int ? round.(Int, clamp.(steps_raw .* total_steps, 0, total_steps)) : steps_raw
     @debug "Steps from ATSSScheduler: " steps
 
     return ATSSScheduler{VT}(total_steps, inference_steps, steps, κ, κ̇, atss_p)
@@ -222,7 +222,7 @@ ATSSScheduler(generator::GraphGenerator, solver::ProblemSolver,
 ATSSScheduler(::Type{VT}, s::ATSSScheduler{VT}) where {VT} = s
 
 function ATSSScheduler(::Type{Int}, s::ATSSScheduler{Float32})
-    steps = round.(Int, clamp.(s.steps .* s.total_steps, 1, s.total_steps))
+    steps = round.(Int, clamp.(s.steps .* s.total_steps, 0, s.total_steps))
     return ATSSScheduler{Int}(s.total_steps, s.inference_steps, steps, s.κ, s.κ̇, s.atss_p)
 end
 

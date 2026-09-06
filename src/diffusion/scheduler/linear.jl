@@ -29,11 +29,11 @@ Constructs a LinearScheduler with integer timesteps.
 """
 function LinearScheduler(::Type{Int}, total_steps::Int, inference_steps::Int)
     if inference_steps >= total_steps
-        return LinearScheduler{Int}(total_steps, inference_steps, collect(1:total_steps))
+        return LinearScheduler{Int}(total_steps, inference_steps, collect(0:total_steps))
     end
-    
+
     c = Float64(total_steps) / Float64(inference_steps)
-    steps = [max(1, floor(Int, c * i)) for i in 1:inference_steps]
+    steps = vcat(0, [max(1, floor(Int, c * i)) for i in 1:inference_steps])  # τ_0 = 0 prepended
     @debug "Steps from LinearScheduler: " steps
 
     return LinearScheduler{Int}(total_steps, inference_steps, steps)
@@ -46,15 +46,15 @@ Constructs a LinearScheduler with normalized Float timesteps.
 """
 function LinearScheduler(::Type{Float32}, total_steps::Int, inference_steps::Int)
     if inference_steps >= total_steps
-        steps = collect(1:total_steps) ./ Float32(total_steps)
+        steps = collect(0:total_steps) ./ Float32(total_steps)
         return LinearScheduler{Float32}(total_steps, inference_steps, steps)
     end
-    
+
     c = Float64(total_steps) / Float64(inference_steps)
     steps_int = [max(1, floor(Int, c * i)) for i in 1:inference_steps]
-    steps = Float32.(steps_int) ./ Float32(total_steps)
+    steps = vcat(0.0f0, Float32.(steps_int) ./ Float32(total_steps))  # τ_0 = 0 prepended
     @debug "Steps from LinearScheduler: " steps
-    
+
     return LinearScheduler{Float32}(total_steps, inference_steps, steps)
 end
 

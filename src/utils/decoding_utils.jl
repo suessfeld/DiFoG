@@ -5,7 +5,7 @@
 using GraphNeuralNetworks
 using Statistics
 
-export greedy_decode_mis, greedy_decode_maxcut, hamming_distance, heatmap_decisiveness, correction_distance
+export hamming_distance, heatmap_decisiveness, correction_distance
 
 """
     decode_heatmap

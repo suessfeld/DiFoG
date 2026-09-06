@@ -56,11 +56,12 @@ Parameters:
 function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5)
     loss_history = Float32[]
     @info "Starting training"
-    
+
     for epoch in 1:epochs
         epoch_loss = 0.0f0
-        num_batches = 1
-        
+        num_batches = 0
+        total_instances = 0
+
         prefetch_channel = Channel(3, spawn=true) do ch
             for batch in data_loader
                 put!(ch, batch)
@@ -68,42 +69,42 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader; epoch
         end
 
         t_start_wait = time()
-        
+
         for (g_batch, names_batch) in prefetch_channel
 
             wait_time = time() - t_start_wait
-            
-            # If the wait time is longer than 50ms, log a starvation warning. This helps with understanding the performance between CPU and GPU!
+
             if wait_time > 0.01
                 @debug "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
             end
-            
+
             batch_size = length(names_batch)
             batch_time = @elapsed begin
-                g_batch = g_batch |> Flux.gpu # move entire batch to gpu
-                x_start = g_batch.ndata.x 
+                g_batch = g_batch |> Flux.gpu
+                x_start = g_batch.ndata.x
                 x_t, timesteps, x_0 = corrupt_batch(model.method, x_start, g_batch)
-                
+
                 loss, grads = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0)
-                
+
                 Flux.update!(optim, model.gnn, grads[1])
             end
-            
+
             avg_time_per_instance = batch_time / batch_size
-            
-            @info "Batch $(num_batches + 1) [$(batch_size*num_batches) instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | GPU Wait time (for solver): $(round(wait_time, digits=4))s"
+            num_batches += 1
+            total_instances += batch_size
+
+            @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | GPU Wait time (for solver): $(round(wait_time, digits=4))s"
 
             epoch_loss += loss
-            num_batches += 1
 
             t_start_wait = time()
         end
-        
+
         avg_loss = epoch_loss / max(1, num_batches)
         push!(loss_history, avg_loss)
         @info "Epoch $epoch | Avg Loss: $avg_loss"
     end
-    
+
     return loss_history
 end
 

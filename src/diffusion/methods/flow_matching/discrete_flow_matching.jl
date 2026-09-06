@@ -190,7 +190,7 @@ function sample_heatmap(diffusion::DiscreteFlowMatching, model, shape::Tuple, g:
     τ_current = 0.0f0
 
     @info "Scheduler State" (; (f => getfield(diffusion.scheduler, f) for f in fieldnames(typeof(diffusion.scheduler)))...)
-    for τ_step in diffusion.scheduler
+    for τ_step in Iterators.drop(diffusion.scheduler, 1)
         x = p(diffusion, model, x, τ_current, τ_step, g)
         τ_current = τ_step
     end

@@ -29,11 +29,11 @@ Constructs a CosineScheduler with integer timesteps.
 """
 function CosineScheduler(::Type{Int}, total_steps::Int, inference_steps::Int)
     if inference_steps >= total_steps
-        return CosineScheduler{Int}(total_steps, inference_steps, collect(1:total_steps))
+        return CosineScheduler{Int}(total_steps, inference_steps, collect(0:total_steps))
     end
-    
+
     c = 1.0 / inference_steps
-    steps = [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps]
+    steps = vcat(0, [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps])
     @debug "Steps from CosineScheduler: " steps
 
     return CosineScheduler{Int}(total_steps, inference_steps, steps)
@@ -46,15 +46,15 @@ Constructs a CosineScheduler with normalized Float timesteps.
 """
 function CosineScheduler(::Type{Float32}, total_steps::Int, inference_steps::Int)
     if inference_steps >= total_steps
-        steps = collect(1:total_steps) ./ Float32(total_steps)
+        steps = collect(0:total_steps) ./ Float32(total_steps)
         return CosineScheduler{Float32}(total_steps, inference_steps, steps)
     end
-    
+
     c = 1.0 / inference_steps
     steps_int = [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps]
-    steps = Float32.(steps_int) ./ Float32(total_steps)
+    steps = vcat(0.0f0, Float32.(steps_int) ./ Float32(total_steps))
     @debug "Steps from CosineScheduler: " steps
-    
+
     return CosineScheduler{Float32}(total_steps, inference_steps, steps)
 end
 

@@ -211,13 +211,10 @@ function sample_heatmap(diffusion::BernoulliDiffusion, model, shape::Tuple, g::G
 
     @debug "Scheduler State" (; (f => getfield(diffusion.scheduler, f) for f in fieldnames(typeof(diffusion.scheduler)))...)
     # iterates as defined by the scheduler
-    for τ_prev in diffusion.scheduler
+    for τ_prev in Iterators.drop(Iterators.reverse(diffusion.scheduler), 1)
         x = p(diffusion, model, x, τ_current, τ_prev, g)
         τ_current = τ_prev
     end
-
-    # final step
-    x = p(diffusion, model, x, τ_current, 0, g)
 
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
     t_batch = CUDA.fill(Int32(1), batch_size)

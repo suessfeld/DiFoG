@@ -15,15 +15,19 @@ Base.length(s::Scheduler) = max(0, length(s.steps) - 1)
 Base.collect(s::Scheduler) = s.steps # use collect to just get the entire step vector
 Base.eltype(::Type{<:Scheduler{T}}) where T = T # Just added for correct typing - does not really have an impact
 
-# Iterator
-function Base.iterate(s::Scheduler, state=length(s.steps) - 1)
-    if state < 1
-        return nothing
-    end
-    return (s.steps[state], state - 1)
+# Forward Iterator τ_0 → τ_T
+function Base.iterate(s::Scheduler, state::Int=1)
+    state > length(s.steps) && return nothing
+    return (s.steps[state], state + 1)
 end
 
-# might be useful as well
+# Reverse view: τ_T → τ_0
+function Base.iterate(r::Iterators.Reverse{<:Scheduler}, state::Int=length(r.itr.steps))
+    state < 1 && return nothing
+    return (r.itr.steps[state], state - 1)
+end
+Base.length(r::Iterators.Reverse{<:Scheduler}) = length(r.itr.steps)
+
 function get_steps(s::Scheduler{T}) where T
     return s.steps
 end
