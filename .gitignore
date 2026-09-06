@@ -32,6 +32,9 @@ workspace/indent.log
 
 src/tests/cases/cluster/*
 /models
+/models_1
+/results_1
+
 /test/pipelines
 
 /.vscode

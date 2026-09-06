@@ -147,20 +147,31 @@ function (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
     s, _ = edge_index(g)
 
     gi = g.graph_indicator
-    B  = hasproperty(g, :num_graphs) ? g.num_graphs : 1
+    B  = isnothing(gi) ? 1 : (hasproperty(g, :num_graphs) ? g.num_graphs : 1)
 
     graph_repr_node = ignore_derivatives() do
-        gi_cpu = Array(gi)::Vector{Int}
-        reps = Vector{Int}(undef, B)
-        @inbounds for gid in 1:B
-            reps[gid] = searchsortedfirst(gi_cpu, gid)
+        if isnothing(gi)
+            # single, un-batched graph: node 1 is the (only) representative.
+            [1]
+        else
+            gi_cpu = Array(gi)::Vector{Int}
+            reps = Vector{Int}(undef, B)
+            @inbounds for gid in 1:B
+                reps[gid] = searchsortedfirst(gi_cpu, gid)
+            end
+            reps
         end
-        reps
     end
     t_emb_graphs = t_emb[:, graph_repr_node]
 
+    # edge_graph_id[e] = which graph edge `e` belongs to, used to broadcast
+    # each graph's projected timestep embedding out to all of its edges.
     edge_graph_id = ignore_derivatives() do
-        gi[s]
+        if isnothing(gi)
+            ones(Int, g.num_edges)
+        else
+            gi[s]
+        end
     end
 
     for i in eachindex(model.layers)

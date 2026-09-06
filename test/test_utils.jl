@@ -74,12 +74,7 @@ function run_automated_pipeline(;
         @info "No existing model found for run_id '$run_id' — training from scratch."
 
         if num_val > 0
-            # B7: build a FIXED, held-out validation set once, up front —
-            # directly via `generator`/`solver` (not through `RuntimeDataset`,
-            # which streams unboundedly and would spawn more permanent
-            # background workers just to be abandoned after pulling a few
-            # instances). Sequential on purpose: num_val is small by default
-            # and this is a one-time setup cost, not a hot loop.
+
             @info "Building fixed validation set ($(num_val) instances, held constant across epochs)..."
             val_instances = Vector{Tuple{GNNGraph,String}}(undef, num_val)
             for i in 1:num_val
@@ -95,14 +90,6 @@ function run_automated_pipeline(;
 
         @info "Initializing Train dataset..."
         train_dataset = RuntimeDataset(num_train, generator, solver; max_concurrent_solves=workers)
-        # C6: `shuffle=true` here was previously misleading — RuntimeDataset's
-        # `getindex` ignores its index entirely (every draw is already an
-        # independent fresh instance pulled from the background generator
-        # pool), so `shuffle` has no effect on what gets served. Left `false`
-        # (the Flux.DataLoader default) and documented rather than implying a
-        # shuffling behavior that isn't actually happening. True index-aware
-        # dataset semantics is a separate, larger fix (RuntimeDataset/RNG
-        # threading) not covered here.
         train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=false, collate=true)
 
         optim = Flux.setup(
@@ -117,6 +104,10 @@ function run_automated_pipeline(;
         loss_history, val_loss_history = Thesis.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader)
         final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
         final_val_loss = isempty(val_loss_history) ? NaN : val_loss_history[end]
+
+        @info "Saving trained model weights immediately after training completes (before test/eval, so a later crash can't discard a completed training run)..."
+        Thesis.save_model(model, model_path)
+        @info "Model successfully saved to $model_path"
     end
 
     num_params = sum(length, Flux.trainables(model.gnn))
@@ -135,11 +126,6 @@ function run_automated_pipeline(;
     total_entropy = 0.0
     total_correction_rate = 0.0
 
-    # B7: per-instance scores, collected so we can report a std/95% CI on the
-    # approximation ratio (previously only the aggregate mean was reported —
-    # "no error bars" per the review). This is within-run variance across the
-    # num_test instances, not cross-run/seed variance (that needs RNG
-    # threading through the generators, out of scope here).
     per_instance_model_scores = Float64[]
     per_instance_true_scores = Float64[]
 
@@ -266,7 +252,6 @@ function run_automated_pipeline(;
     avg_entropy = total_entropy / total_graphs
     avg_correction_rate = total_correction_rate / total_graphs
 
-    # B7: per-instance approximation-ratio std/95% CI (within this run).
     score_ratios = Float64[]
     for (m, t) in zip(per_instance_model_scores, per_instance_true_scores)
         if t > 0
@@ -322,12 +307,6 @@ function run_automated_pipeline(;
         @info "Repeated Inference Stability | Instance $(last_test_instance_idx) | Avg Normalized Hamming Distance across $(num_repeat_inference) runs: $(round(avg_hamming_stability, digits=4))"
     end
 
-    # B7: optional supplementary out-of-distribution / generalization pass.
-    # Deliberately a separate, simpler synchronous loop (no background
-    # file-writing, no repeated-inference check) reusing the same exported
-    # decode/evaluate functions as the main loop — kept independent so it
-    # can't affect the correctness of the primary (already-working)
-    # evaluation loop above. No-op unless `ood_generator` is supplied.
     ood_avg_model_score = NaN
     ood_avg_true_score = NaN
     ood_performance_pct = NaN
@@ -378,13 +357,6 @@ function run_automated_pipeline(;
     mkpath(results_dir)
     filepath = joinpath(results_dir, "report-$run_id.tex")
 
-    if !model_already_exists
-        @info "Saving trained model weights..."
-        Thesis.save_model(model, model_path)
-        @info "Model successfully saved to $model_path"
-    else
-        @info "Skipped saving — model was loaded from disk, weights unchanged."
-    end
 
     label_base = replace(run_id, r"[^A-Za-z0-9]" => "-")
 
@@ -454,11 +426,6 @@ function run_automated_pipeline(;
         write_latex_kv_table(io, results_rows; caption="Results and performance metrics for run $(run_id)", label="tab:results-$(label_base)")
 
         # ---- Heatmap Quality ----
-        # D4: labels now match what heatmap_decisiveness actually computes —
-        # true (clamped) binary Shannon entropy H̄ ∈ [0, ln 2], and
-        # confidence = 1 - H̄/ln(2). Previously these labels described a true
-        # entropy quantity while the code computed mean(|2p-1|); both sides
-        # now agree.
         println(io, "\\subsubsection{Heatmap Quality}")
         write_latex_kv_table(io, [
             ("Avg Pseudo-Entropy \$1 - \\bar{D}\$ (lower = more decisive)", string(round(avg_entropy, digits=4))),
