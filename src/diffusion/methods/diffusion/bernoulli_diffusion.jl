@@ -21,7 +21,8 @@ struct BernoulliDiffusion <: Diffusion
     scheduler::Scheduler{Int}
 end
 
-""" get_betas(scheduler::Scheduler)
+"""
+    get_betas(scheduler::Scheduler)
 
 Gets the corruption ratio values from the assigned scheduler (for each step). Length is dependent on the configured stepsize (total_steps) in the scheduler.
 
@@ -34,7 +35,8 @@ function get_betas(scheduler::Scheduler)
     return Float32.(range(1f-4, 2f-2, length=T))
 end
  
-""" get_alphas(scheduler::Scheduler)
+"""
+    get_alphas(scheduler::Scheduler)
 
 Gets the cumulative product of the signal scaling factors for the Bernoulli transition matrices. Length is dependent on the configured stepsize (total_steps) in the scheduler.
 
