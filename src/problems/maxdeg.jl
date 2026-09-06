@@ -7,6 +7,8 @@ using Graphs
 export MaxDegSolver
 
 """
+    MaxDegSolver <: ProblemSolver
+    
 A solver that solves the Maximum Degree Problem.
 """
 struct MaxDegSolver <: ProblemSolver end

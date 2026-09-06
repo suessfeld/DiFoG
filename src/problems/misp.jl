@@ -9,6 +9,8 @@ using Gurobi
 export MISPSolver
 
 """
+    MISPSolver <: ProblemSolver
+
 A solver that solves the Maximum Independent Set Problem with the usage of Gurobi.
 Delegates the actual ILP formulation to `NodeSelectionProblems.ILP!` (via `MIS`),
 avoiding duplication of the MIS constraint/objective logic already defined there.

@@ -8,6 +8,8 @@ using JuMP
 export MaxCutSolver
 
 """
+    MaxCutSolver <: ProblemSolver
+    
 A solver that solves the Maximum Cut Problem with the usage of Gurobi.
 """
 struct MaxCutSolver <: ProblemSolver

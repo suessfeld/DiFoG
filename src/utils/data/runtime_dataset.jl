@@ -10,16 +10,22 @@ using .DataUtils: normalize_graph
 export RuntimeDataset, GraphGenerator, ProblemSolver
 
 """
+    GraphGenerator
+
 Wrapper for a generic graph generator.
 """
 abstract type GraphGenerator end
 
 """
+    ProblemSolver
+
 Wrapper for a generic problem solver. Must implement a solver and a heatmap decoder.
 """
 abstract type ProblemSolver end
 
 """
+    RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
+    
 Dataset that is solved during runtime. It uses the generator to create instances on-the-fly in an asynchron manner and solves them with the provided solver. A buffer keeps solved instances so they can be provided in batches without any wait (if possible).
 """
 struct RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}

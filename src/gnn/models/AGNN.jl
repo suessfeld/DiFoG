@@ -11,6 +11,11 @@ using Zygote: ignore_derivatives
 
 export AGNN
 
+"""
+    OutputHead
+
+Final node-wise prediction head: BatchNorm + ReLU + Dense.
+"""
 struct OutputHead
     bn     :: BatchNorm
     linear :: Dense
@@ -22,8 +27,18 @@ OutputHead(d::Int, output_dim::Int) = OutputHead(
     Dense(d, output_dim)
 )
 
+"""
+    (m::OutputHead)(h::AbstractMatrix)
+
+Maps hidden node features to output logits.
+"""
 (m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))
 
+"""
+    AGNNLayer
+
+One anisotropic message-passing layer, updating both node (`h`) and edge (`e`) features.
+"""
 struct AGNNLayer
     U      :: Dense
     V      :: Dense
@@ -47,6 +62,12 @@ AGNNLayer(d::Int) = AGNNLayer(
     Chain(Dense(d, d, relu), Dense(d, d)),
 )
 
+"""
+    (layer::AGNNLayer)(g::GNNGraph, h::AbstractMatrix, e::AbstractMatrix)
+
+Computes one anisotropic node/edge update step: gated message passing for `h`,
+edge-gate MLP for `e`. Returns `(h_delta, e_delta)`.
+"""
 function (layer::AGNNLayer)(g::GNNGraph, h::AbstractMatrix, e::AbstractMatrix)
     s, t = edge_index(g)
 
@@ -82,6 +103,13 @@ struct AGNN <: GNN
 end
 Flux.@layer AGNN
 
+"""
+    AGNN(config::GNNConfig, feature_dim::Int=1)
+
+Builds an `AGNN` with `config.num_layers` `AGNNLayer`s, sized from `config`.
+`feature_dim` is the raw node-state width; the remainder of `config.in_dim`
+is treated as timestep-embedding width.
+"""
 function AGNN(config::GNNConfig, feature_dim::Int=1)
     d        = config.hidden_dim
     time_dim = config.in_dim - feature_dim
@@ -99,6 +127,13 @@ function AGNN(config::GNNConfig, feature_dim::Int=1)
     )
 end
 
+"""
+    (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
+
+Forward pass: splits `x_input` into raw state and timestep embedding, embeds
+nodes, runs `L` message-passing layers (feeding the time embedding into each
+edge update), and returns per-node output logits.
+"""
 function (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
     fd = model.feature_dim
 

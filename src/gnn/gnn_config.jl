@@ -5,6 +5,8 @@
 export GNNConfig
 
 """
+    GNNConfig
+    
 Represents a basic configuration of a GNN. 
 """
 struct GNNConfig

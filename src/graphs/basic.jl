@@ -8,6 +8,8 @@ using Random
 export BasicGraphGenerator
 
 """
+    BasicGraphGenerator <: GraphGenerator
+    
 A basic graph generator that generates according to the defined ranged of nodes and edges.
 """
 struct BasicGraphGenerator <: GraphGenerator
