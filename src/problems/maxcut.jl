@@ -1,3 +1,7 @@
+# maxcut.jl
+#
+#
+
 using Graphs
 using JuMP
 
@@ -12,6 +16,19 @@ end
 
 MaxCutSolver(; time_limit::Float64=0.5) = MaxCutSolver(time_limit)
 
+"""
+    (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
+
+Solves MaxCut for `g` via Gurobi. Delegates the ILP formulation
+to `ILP!`/`NSPInstance{MAXCUT}`.
+
+Retries once with a fresh `Gurobi.Env()` if the WLS connection drops mid-solve;
+a poisoned environment is discarded and replaced in the background
+(`GRB_ENV_POOL`) rather than returned to the pool.
+
+Parameters:
+    - 'g': The graph instance to solve MaxCut for.
+"""
 function (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
     n = nv(g)
     env = take!(GRB_ENV_POOL)

@@ -6,6 +6,8 @@ export MISPSolver
 
 """
 A solver that solves the Maximum Independent Set Problem with the usage of Gurobi.
+Delegates the actual ILP formulation to `NodeSelectionProblems.ILP!` (via `MIS`),
+avoiding duplication of the MIS constraint/objective logic already defined there.
 """
 struct MISPSolver <: ProblemSolver
     time_limit::Float64
@@ -35,52 +37,52 @@ end
 
 MISPSolver(; time_limit::Float64=0.5) = MISPSolver(time_limit)
 
-function (solver::MISPSolver)(g::AbstractGraph)
+"""
+    (solver::MISPSolver)(g::Graphs.SimpleGraph)
+
+Solves MISP for `g` via Gurobi. Delegates the ILP formulation
+to `ILP!`/`NSPInstance{MIS}`.
+
+Retries once with a fresh `Gurobi.Env()` if the WLS connection drops mid-solve;
+a poisoned environment is discarded and replaced in the background
+(`GRB_ENV_POOL`) rather than returned to the pool.
+
+Parameters:
+    - 'g': The graph instance to solve MISP for.
+"""
+function (solver::MISPSolver)(g::Graphs.SimpleGraph)
     n = nv(g)
     env = take!(GRB_ENV_POOL)
     x_0 = zeros(Float32, 1, n)
     is_poisoned = false
-    
-    function build_and_solve(current_env)
-        model = Model(() -> Gurobi.Optimizer(current_env))
-        set_silent(model)
-        set_optimizer_attribute(model, "TimeLimit", solver.time_limit)
-        set_optimizer_attribute(model, "Threads", 1)
 
-        @variable(model, x[1:n], Bin)
-        for e in edges(g)
-            @constraint(model, x[src(e)] + x[dst(e)] <= 1)
+    function build_and_solve(current_env)
+        inst = NSPInstance(
+            MIS(0), g, n, ne(g),
+            Ref{Union{Nothing, JuMP.Model}}(nothing),
+            (;),
+        )
+        return ILP!(inst; silent=true, time_limit=solver.time_limit,
+                     warn_time_limit=false, env=current_env)
+    end
+
+    function apply_solution!(sol)
+        for i in 1:sol.sel
+            x_0[1, sol.x[i]] = 1.0f0
         end
-        @objective(model, Max, sum(x[i] for i in 1:n))
-        optimize!(model)
-        return model
     end
 
     try
-        model = build_and_solve(env)
-        status = termination_status(model)
-        if status == MOI.OPTIMAL || (status == MOI.TIME_LIMIT && has_values(model))
-            x_var = model[:x]
-            for i in 1:n
-                value(x_var[i]) > 0.5 && (x_0[1, i] = 1.0f0)
-            end
-        end
-        empty!(model)
+        sol, status, rel_gap, solve_time = build_and_solve(env)
+        apply_solution!(sol)
     catch opt_e
         @warn "Gurobi Token/Network Dropped. Discarding environment and attempting recovery..." exception=opt_e
         is_poisoned = true
-        
+
         try
             new_env = Gurobi.Env()
-            model = build_and_solve(new_env)
-            status = termination_status(model)
-            if status == MOI.OPTIMAL || (status == MOI.TIME_LIMIT && has_values(model))
-                x_var = model[:x]
-                for i in 1:n
-                    value(x_var[i]) > 0.5 && (x_0[1, i] = 1.0f0)
-                end
-            end
-            empty!(model)
+            sol, status, rel_gap, solve_time = build_and_solve(new_env)
+            apply_solution!(sol)
             env = new_env
             is_poisoned = false
         catch recovery_e
@@ -110,7 +112,7 @@ function (solver::MISPSolver)(g::AbstractGraph)
             end
         end
     end
-    
+
     return x_0
 end
 
@@ -142,16 +144,12 @@ function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
 
     for node in sorted_nodes
         conflict = false
-
-        # check if any neighbor is already in the independent set
         for neighbor in adj[node]
             if in_set[neighbor]
                 conflict = true
                 break
             end
         end
-
-        # if no neighbors are in the set, it's safe to add this node
         if !conflict
             in_set[node] = true
         end
