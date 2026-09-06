@@ -1,3 +1,7 @@
+# src/graphs/er.jl
+#
+# Wrapper for generating Erdős-Rényi (ER) random graphs, delegating the core logic to NodeSelectionProblems.jl
+
 using Graphs
 using Random
 

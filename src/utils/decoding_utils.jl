@@ -1,3 +1,7 @@
+# src/utils/decoding_utils.jl
+#
+# Utility functions for evaluating model predictions, including calculating hamming distances, heatmap decisiveness, and correction distances.
+
 using GraphNeuralNetworks
 using Statistics
 

@@ -1,3 +1,7 @@
+# src/problems/misp.jl
+#
+# Gurobi-based exact solver for the Maximum Independent Set Problem (MISP) delegating ILP formulation to NodeSelectionProblems.jl, and implements greedy decoding based on the sun-23-difusco.pdf paper[cite: 1].
+
 using Graphs
 using JuMP
 using Gurobi

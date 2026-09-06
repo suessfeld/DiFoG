@@ -1,3 +1,7 @@
+# src/diffusion/scheduler.jl
+#
+# Defines the abstract Scheduler type and basic iteration utilities for managing denoising and integration timesteps across different methods.
+
 export Scheduler
 
 """

@@ -1,3 +1,8 @@
+# src/diffusion/methods/flow_matching/discrete_flow_matching.jl
+#
+# Implements the Discrete Flow Matching framework from the EFLOCO paper.
+# Manages continuous time integration, velocity fields, and consistency losses for stable transition paths.
+
 using Flux
 using Statistics
 using Random

@@ -1,3 +1,7 @@
+# src/diffusion/scheduler/cosine.jl
+#
+# Implements a cosine denoising schedule to control the noise ratios during the forward and reverse diffusion processes.
+
 export CosineScheduler
 
 """

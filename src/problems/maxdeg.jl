@@ -1,3 +1,7 @@
+# src/problems/maxdeg.jl
+#
+# Solver and heatmap decoding strategy for the Maximum Degree (MaxDeg) problem, operating in conjunction with the exact problem definitions in NodeSelectionProblems.jl.
+
 using Graphs
 
 export MaxDegSolver

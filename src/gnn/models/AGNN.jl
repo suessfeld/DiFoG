@@ -1,3 +1,7 @@
+# src/gnn/models/AGNN.jl
+#
+# Implements the Anisotropic Graph Neural Network (AGNN) backbone, handling message passing and feature extraction for both nodes and edges.
+
 using Flux
 using Statistics
 using GraphNeuralNetworks

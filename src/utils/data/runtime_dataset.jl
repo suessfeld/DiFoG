@@ -1,3 +1,7 @@
+# src/utils/data/runtime_dataset.jl
+#
+# Implements an asynchronous, runtime dataset generator that yields graph instances and their exact solver solutions on-the-fly for efficient training.
+
 using Flux
 using GraphNeuralNetworks
 using Graphs

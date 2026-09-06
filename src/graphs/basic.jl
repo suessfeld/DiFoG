@@ -1,3 +1,7 @@
+# src/graphs/basic.jl
+#
+# A basic random graph generator that creates graph instances within specified node and edge count ranges.
+
 using Graphs
 using Random
 

@@ -1,3 +1,7 @@
+# src/utils/data/data_utils.jl
+#
+# Data utilities for normalizing graph formats and ensuring correct data types for GPU compatibility.
+
 module DataUtils
 
 using Flux

@@ -1,3 +1,7 @@
+# src/gnn/gnn_config.jl
+#
+# Configuration struct defining the hyperparameters and dimensionalities (layers, input/hidden/output dims) for the GNN models.
+
 export GNNConfig
 
 """

@@ -1,4 +1,8 @@
 # src/diffusion/scheduler/atss.jl
+#
+# Implements the Adaptive Time-Step Scheduling (ATSS) strategy from the EFLOCO paper,
+# dynamically allocating fine-grained integration steps based on state variations.
+
 using LinearAlgebra: norm
 
 export ATSSScheduler
@@ -17,7 +21,6 @@ Fields:
     - 'κ̇': The derivative of the interpolation function.
     - 'atss_p': The exponent p controlling the path weight.
 """
-
 struct ATSSScheduler{T} <: Scheduler{T}
     total_steps::Int
     inference_steps::Int

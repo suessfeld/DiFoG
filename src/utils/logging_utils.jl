@@ -1,3 +1,7 @@
+# src/utils/logging_utils.jl
+#
+# Global logging configuration utilities to control console verbosity and debug output across the codebase.
+
 using Logging
 
 export set_log_level!, get_log_level

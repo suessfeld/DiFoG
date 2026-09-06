@@ -1,3 +1,8 @@
+# src/diffusion/methods/diffusion/bernoulli_diffusion.jl
+#
+# Implements Continuous Diffusion with Bernoulli noise as described in the DIFUSCO paper.
+# Handles the forward corruption and backward denoising steps for combinatorial optimization.
+
 using Flux
 using Statistics
 using Random

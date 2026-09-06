@@ -1,6 +1,6 @@
-# maxcut.jl
+# src/problems/maxcut.jl
 #
-#
+# Gurobi-based exact solver and heatmap decoding for the Maximum Cut (MAXCUT) problem, delegating the ILP formulation to NodeSelectionProblems.jl.
 
 using Graphs
 using JuMP

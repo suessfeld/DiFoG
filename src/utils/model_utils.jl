@@ -1,3 +1,7 @@
+# src/utils/model_utils.jl
+#
+# Utilities for safely saving and loading trained GNN model states to and from disk using JLD2.
+
 using Flux
 using JLD2
 

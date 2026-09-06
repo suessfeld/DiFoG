@@ -1,28 +1,20 @@
+# src/diffusion_model.jl
+#
+# High-level wrapper combining a GNN with a generative method (Diffusion or Flow Matching).
+# Manages the primary training loop, batching, loss computation, and inference generation.
+
 using ChainRulesCore: unthunk, AbstractThunk
 export DiffusionModel
 
 """
-Represents a Diffusionmodel consisting of a general, a diffusion method and a scheduler. 
+    DiffusionModel{G<:GNN, M<:Diffusion}
+    
+Represents a Diffusionmodel consisting of a gnn and a generative method (e.g. Bernoulli Denoising Diffusion or Flow Matching). 
 """
 struct DiffusionModel{G<:GNN, M<:Diffusion}
     gnn::G
     method::M
 end
-
-"""
-    (model::DiffusionModel)(g::GNNGraph, x::AbstractMatrix)
-
-Constructor
-
-Parameters:
-    - 'g': A graph(batch).
-    - 'x': A feature matrix.
-"""
-
-function (model::DiffusionModel)(g::GNNGraph, x_t::AbstractMatrix)
-    return model.gnn(g, x_t)
-end
-
 
 _embed_timesteps(t_emb, ::Nothing, x_t) =
     repeat(t_emb, 1, size(x_t, 2))

@@ -1,3 +1,7 @@
+# src/diffusion/scheduler/linear.jl
+#
+# Implements a linear denoising schedule to control the noise ratios during the forward and reverse diffusion processes.
+
 export LinearScheduler
 
 """
@@ -15,7 +19,6 @@ struct LinearScheduler{T} <: Scheduler{T}
     inference_steps::Int
     steps::Vector{T}
 end
-
 
 LinearScheduler(total_steps::Int, inference_steps::Int) = LinearScheduler(Int, total_steps, inference_steps)
 
