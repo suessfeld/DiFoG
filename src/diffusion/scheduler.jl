@@ -11,7 +11,7 @@ An abstract implementation of a scheduler. Implementations can either be of type
 """
 abstract type Scheduler{T} end
 
-Base.length(s::Scheduler) = max(0, length(s.steps) - 1)
+Base.length(s::Scheduler) = max(0, length(s.steps))
 Base.collect(s::Scheduler) = s.steps # use collect to just get the entire step vector
 Base.eltype(::Type{<:Scheduler{T}}) where T = T # Just added for correct typing - does not really have an impact
 
