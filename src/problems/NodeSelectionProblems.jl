@@ -453,7 +453,7 @@ function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing;
 
     if isnothing(inst.ilp_model[])
         # construct ILP model   
-        inst.ilp_model[] = model = Model(() -> Gurobi.Optimizer(GRB_ENV[]))
+        inst.ilp_model[] = model = Model(() -> Gurobi.Optimizer(env))
         silent ? set_silent(model) : unset_silent(model)
         set_time_limit_sec(model, time_limit)
         @variable(model, x[1:n], Bin)
