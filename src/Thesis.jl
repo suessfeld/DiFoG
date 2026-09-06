@@ -15,7 +15,6 @@ include("./diffusion/scheduler.jl")
 include("./gnn/gnn.jl")
 
 include("./gnn/gnn_config.jl") 
-include("./utils/math_utils.jl")
 
 include("diffusion_model.jl")
 
