@@ -23,7 +23,7 @@ end
 Flux.@layer OutputHead
 
 OutputHead(d::Int, output_dim::Int) = OutputHead(
-    BatchNorm(d),
+    BatchNorm(d, track_stats=false),
     Dense(d, output_dim)
 )
 
@@ -57,8 +57,8 @@ AGNNLayer(d::Int) = AGNNLayer(
     Dense(d, d),
     Dense(d, d),
     Dense(d, d),
-    BatchNorm(d),
-    BatchNorm(d),
+    BatchNorm(d, track_stats=false),
+    BatchNorm(d, track_stats=false),
     Chain(Dense(d, d, relu), Dense(d, d)),
 )
 
@@ -145,44 +145,13 @@ function (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
     end
 
     s, _ = edge_index(g)
-
-    gi = g.graph_indicator
-    B  = isnothing(gi) ? 1 : (hasproperty(g, :num_graphs) ? g.num_graphs : 1)
-
-    graph_repr_node = ignore_derivatives() do
-        if isnothing(gi)
-            # single, un-batched graph: node 1 is the (only) representative.
-            [1]
-        else
-            gi_cpu = Array(gi)::Vector{Int}
-            reps = Vector{Int}(undef, B)
-            @inbounds for gid in 1:B
-                reps[gid] = searchsortedfirst(gi_cpu, gid)
-            end
-            reps
-        end
-    end
-    t_emb_graphs = t_emb[:, graph_repr_node]
-
-    # edge_graph_id[e] = which graph edge `e` belongs to, used to broadcast
-    # each graph's projected timestep embedding out to all of its edges.
-    edge_graph_id = ignore_derivatives() do
-        if isnothing(gi)
-            ones(Int, g.num_edges)
-        else
-            gi[s]
-        end
-    end
+    t_emb_edges = t_emb[:, s]
 
     for i in eachindex(model.layers)
         h_in, e_in = h, e
         h_delta, e_delta = model.layers[i](g, h, e)
-
-        t_proj_graphs = model.time_layers[i](t_emb_graphs)
-        t_proj_edges  = t_proj_graphs[:, edge_graph_id]
-
         h = h_in .+ h_delta
-        e = e_in .+ e_delta .+ t_proj_edges
+        e = e_in .+ e_delta .+ model.time_layers[i](t_emb_edges)
     end
 
     return model.output_head(h)
