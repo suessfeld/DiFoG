@@ -1,7 +1,7 @@
 # Thesis.jl
 
-A Julia framework for solving Combinatorial Optimization Problems (COPs) like the Maximum Independet Set (MIS) or Maximum Cut (MaxCut) problem on graphs with **generative diffusion models built on Graph Neural Networks**. It implements the discrete
-Bernoulli diffusion framework proposed by Sun et al. in **DIFUSCO** and the discrete flow matching framework **EFLOCO**, implemented by Wang et al., both driven by an anisotropic GNN denoiser and a family of pluggable timestep schedulers (linear, cosine, Adaptive Time-step Scheduling Strategy (ATSS)).
+A Julia framework for solving Combinatorial Optimization Problems (COPs) like the Maximum Independent Set (MIS) or Maximum Cut (MaxCut) problem on graphs with **generative diffusion models built on Graph Neural Networks**. It implements the discrete
+Bernoulli diffusion framework proposed by Sun et al. in **DIFUSCO** and the discrete flow matching framework proposed by Li et al. in **EFLOCO**, both driven by an anisotropic GNN denoiser and a family of pluggable timestep schedulers (linear, cosine, Adaptive Time-step Scheduling Strategy (ATSS)).
 
 The package is built on `Flux.jl` and `GraphNeuralNetworks.jl`, and is
 designed around **runtime-generated training data**: graphs and their
@@ -30,11 +30,21 @@ into each other:
 
 | Abstraction | Role | Implementations |
 |---|---|---|
-| `Diffusion` | Defines forward corruption `q` / reverse denoising `p` and the training loss | `BernoulliDiffusion`, `GaussianDiffusion` (unmaintained), `DiscreteFlowMatching` |
+| `Diffusion` | Defines forward corruption `q` / reverse denoising `p` and the training loss | `BernoulliDiffusion`, `DiscreteFlowMatching` |
 | `Scheduler{T}` | Produces the sequence of (integer or continuous) timesteps used during inference | `LinearScheduler`, `CosineScheduler`, `ATSSScheduler` |
 | `GNN` | The denoising network, called as `model(g, x_input)` | `AGNN` (Anisotropic GNN, Joshi/Laurent & Bresson style) |
 | `GraphGenerator` / `ProblemSolver` | Produce training/test instances at runtime: a random graph and its (near-)optimal label vector | `ERGraphGenerator`, `BasicGraphGenerator` / `MISPSolver`, `MaxCutSolver`, `MaxDegSolver` |
 
+Both `Diffusion` implementations share the same coupling to `Scheduler{T}`'s
+numeric type parameter: `BernoulliDiffusion` requires a `Scheduler{Int}`
+(the reverse process walks a discrete step index), while
+`DiscreteFlowMatching` requires a `Scheduler{Float32}` (it interpolates over
+a continuous time `t ∈ [0,1]`). `LinearScheduler`/`CosineScheduler` default
+to `Scheduler{Int}` unless you explicitly construct them as
+`LinearScheduler(Float32, total_steps, inference_steps)`, so switching a
+pipeline between methods generally also means switching (or explicitly
+typing) the scheduler — see [Swapping the method](#example-pipeline-usage)
+below.
 
 At inference time, `sample_heatmap` iterates the reverse process over the
 steps produced by the chosen `Scheduler`, producing a per-node probability
@@ -44,59 +54,56 @@ heatmap, which is then greedily decoded into a feasible solution via
 ---
 
 ## Module Structure
-
 ```
 src/
-├── Thesis.jl                       # module entry point, include order
-├── diffusion_model.jl              # DiffusionModel wrapper, training loop,
+├── Thesis.jl # module entry point, include order
+├── diffusion_model.jl # DiffusionModel wrapper, training loop, build_model_input
 ├── diffusion/
-│   ├── diffusion.jl                # abstract type Diffusion
-│   ├── scheduler.jl                # abstract type Scheduler{T} (iterator interface)
-│   ├── scheduler/
-│   │   ├── linear.jl               # LinearScheduler
-│   │   ├── cosine.jl               # CosineScheduler
-│   │   └── atss.jl                 # ATSSScheduler (Adaptive Time-Step Scheduling)
-│   └── methods/
-│       ├── diffusion/
-│       │   ├── bernoulli_diffusion.jl   # proposed in DIFUSCO(unmaintained)
-│       └── flow_matching/
-│           └── discrete_flow_matching.jl # proposed in EFLOCO
+│ ├── diffusion.jl # abstract type Diffusion
+│ ├── scheduler.jl # abstract type Scheduler{T} (iterator interface)
+│ ├── scheduler/
+│ │ ├── linear.jl # LinearScheduler
+│ │ ├── cosine.jl # CosineScheduler
+│ │ └── atss.jl # ATSSScheduler (Adaptive Time-Step Scheduling)
+│ └── methods/
+│ ├── diffusion/
+│ │ └── bernoulli_diffusion.jl # proposed in DIFUSCO
+│ └── flow_matching/
+│ └── discrete_flow_matching.jl # proposed in EFLOCO
 ├── gnn/
-│   ├── gnn.jl                      # abstract type GNN
-│   ├── gnn_config.jl               # GNN configuration
-│   └── models/
-│       └── AGNN.jl                 # Anisotropic GNN used by common literature
-├── utils/
-│   ├── math_utils.jl
-│   ├── model_utils.jl              # save_model / load_model! (JLD2)
-│   ├── decoding_utils.jl           # helpers for heatmap decoding
-│   ├── logging_utils.jl            # logging utils
-│   └── data/
-│       ├── data_utils.jl           # normalize_graph
-│       ├── runtime_dataset.jl      # RuntimeDataset for training
-│       ├── graphs/
-│       │   ├── basic.jl            # basic graph implementation
-│       │   └── er.jl               # Erdős–Rényi graphs
-│       ├── problems/               
-│       │   ├── maxcut.jl           # MaxCut problem
-│       │   ├── maxdeg.jl           # MaxDeg problem
-│       │   ├── misp.jl             # MIS problem             
-│       │   └── NodeSelectionProblems.jl # Integration of existing Gurobi Code       
-tests/
-├── runtests.jl                     # testrunner
-├── test_utils.jl                   # test utils (pipeline logic)
-└── cases/
-    ├── test_data_utils.jl          # testing of data utils
-    ├── test_decoding_utils.jl      # testing of decoding utils
-    ├── test_diffusion.jl           # testing of diffusion logic (DIFUSCO)
-    ├── test_flow_matching.jl       # testing of flow matching logic (EFLOCO)
-    ├── test_graph_generator.jl     # testing of the graph generation
-    ├── test_math_utils.jl          # testing of used math utils
-    └── test_schedulers.jl          # testing of scheduler logic
-```
+│ ├── gnn.jl # abstract type GNN
+│ ├── gnn_config.jl # GNN configuration
+│ └── models/
+│ └── AGNN.jl # Anisotropic GNN used by common literature
+├── graphs/
+│ ├── basic.jl # BasicGraphGenerator
+│ └── er.jl # ERGraphGenerator (Erdős–Rényi)
+├── problems/
+│ ├── maxcut.jl # MaxCut problem (MaxCutSolver)
+│ ├── maxdeg.jl # MaxDeg problem (MaxDegSolver)
+│ ├── misp.jl # MIS problem (MISPSolver)
+│ └── NodeSelectionProblems.jl # shared NSP/ILP machinery (Gurobi)
+└── utils/
+├── model_utils.jl # save_model / load_model! (JLD2)
+├── decoding_utils.jl # heatmap decoding/evaluation helpers
+├── logging_utils.jl # logging utils
+└── data/
+├── data_utils.jl # normalize_graph
+└── runtime_dataset.jl # RuntimeDataset for training
 
+test/
+├── runtests.jl # test runner (TestItemRunner)
+├── test_utils.jl # pipeline helper (run_automated_pipeline)
+└── cases/
+│   ├── test_data_utils.jl
+│   ├── test_decoding_utils.jl
+│   ├── test_diffusion.jl # DIFUSCO / BernoulliDiffusion tests
+│   ├── test_flow_matching.jl # EFLOCO / DiscreteFlowMatching tests
+│   ├── test_graph_generators.jl
+└── └── test_schedulers.jl
+```
 ## Usage
-The main way this module was used and tested is via pipelines. The `test_utils.jl` provide a set of helpers to set up different configurations efficiently.
+The main way this module was used and tested is via pipelines. `test/test_utils.jl` provides a set of helpers to set up different configurations efficiently — most importantly `run_automated_pipeline`, which handles training, evaluation, and report generation end to end.
 
 ### Example Pipeline Usage
 
@@ -110,15 +117,15 @@ using Flux
 using Thesis
 
 # Training and pipeline helpers are outside of the package!
-include(joinpath(pkgdir(Thesis), "src", "tests", "test_utils.jl"))
+include(joinpath(pkgdir(Thesis), "test", "test_utils.jl"))
 
 function main()
-    # `run_id` is derived from the script's own filename. 
+    # `run_id` is derived from the script's own filename.
     current_file = basename(@__FILE__)
     run_id = replace(current_file, ".jl" => "")
 
     # 1) Data: For Training and Testing both graph type and problem solver has to be
-    # defined. 
+    # defined.
     generator = ERGraphGenerator(min_nodes=300, max_nodes=400, p=0.15)
     solver = MaxCutSolver(time_limit=0.2)   # Gurobi time limit for training due to computational limitation
 
@@ -133,8 +140,8 @@ function main()
     gnn = AGNN(gnn_config)
 
     # 3) Method/Scheduler: Define what denoising/diffusion method and scheduler
-    # should be used. Generally those are independent.
-    scheduler = CosineScheduler(1000, 50)
+    # should be used.
+    scheduler = CosineScheduler(1000, 50)   # defaults to Scheduler{Int}
     method = BernoulliDiffusion(scheduler)
 
     # 4) Compose and move the whole model to the GPU.
@@ -153,7 +160,7 @@ function main()
         learning_rate = 0.002,
         num_repeat_inference = 100   # repeated re-inference on last test
                                      # instance, to measure sampling variation on
-                                     # the same isntance
+                                     # the same instance
     )
 end
 
@@ -163,9 +170,14 @@ Base.invokelatest(main)
 Some noteworthy details for pipeline usage:
 
 - **Naming**: In the provided example the run_id will always be taken from the filename. This results in a clear separation of pipeline runs.
-- **Swapping the method**: replace `BernoulliDiffusion(scheduler)` with `DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇)` to switch from diffusion to flow matching; both satisfy the same `Diffusion` interface (`corrupt_batch`, `p`, `sample_heatmap`, `compute_loss_and_gradients`/`calculate_loss`), so the rest of the script is unchanged.
-- **Swapping the scheduler**: `LinearScheduler`, `CosineScheduler` take `(total_steps, inference_steps)`; `ATSSScheduler` additionally needs the `generator`, `solver`, and the interpolation function `κ`/`κ̇` to fit an adaptive step sequence up front.
+- **Existing models are loaded automatically**: `run_automated_pipeline` checks `models/model-<run_id>.jld2` before training; if a matching file exists, training is skipped entirely and the saved weights are loaded instead. Delete (or rename) the file to force a fresh training run under the same `run_id`.
+- **Swapping the method**: replace `BernoulliDiffusion(scheduler)` with `DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇)` to switch from diffusion to flow matching. Both satisfy the same broad `Diffusion` interface (`corrupt_batch`, `p`, `sample_heatmap`, `compute_loss_and_gradients`/`calculate_loss`), **but the rest of the script is not fully interchangeable**:
+  - `DiscreteFlowMatching` requires a `Scheduler{Float32}`; construct the scheduler as `CosineScheduler(Float32, total_steps, inference_steps)` (or the `Int`-based default won't satisfy the constructor).
+  - `DiscreteFlowMatching` additionally needs `λ_cons` (consistency-loss weight) and the interpolation function `κ` plus its derivative `κ̇`, e.g. `κ = t -> t`, `κ̇ = t -> 1.0f0`.
+  - The two methods' `p` step functions differ in signature (`p(..., t::Int, s::Int, g)` for Bernoulli vs. `p(..., τ::Real, τ_next::Real, g)` for flow matching) — this only matters if you're calling `p` directly rather than through `sample_heatmap`.
+- **Swapping the scheduler**: `LinearScheduler`, `CosineScheduler` take `(total_steps, inference_steps)`, or `(T, total_steps, inference_steps)` where `T` is `Int` or `Float32` to pick the eltype explicitly; `ATSSScheduler` additionally needs the `generator`, `solver`, and the interpolation function `κ`/`κ̇` to fit an adaptive step sequence up front.
 - **Swapping the problem**: pair `MISPSolver(time_limit)` with a MISP-oriented pipeline, or `MaxCutSolver(time_limit)` for Max-Cut — `decode_heatmap` is dispatched on the solver type, so the correct decoding strategy (greedy independent-set repair vs. naive thresholding) is picked up automatically.
+- **Validation**: by default, `run_automated_pipeline` builds a small held-out validation set (`num_val`, default `max(20, num_train÷20)`) and reports per-epoch validation loss alongside training loss. Pass `num_val = 0` to skip this.
 
 ### Running a pipeline
 
@@ -174,24 +186,21 @@ julia --project=. path/to/your_run_script.jl
 ```
 
 ### Outputs
-
+```
 A completed run produces:
-
+models/model-<run_id>.jld2 # trained GNN weights (JLD2, CPU state)
+results/report-<run_id>.tex # latex report
+results/test_instances_<run_id>/test_instance_<n>result.txt # test instances (truth + pred.)
+test_instance<last>_<r>_result.txt # repeated inference on last inst.
 ```
-models/model-<run_id>.jld2                        # trained GNN weights (JLD2, CPU state)
-results/report-<run_id>.tex                        # LaTeX tables: config, hyperparams
-results/test_instances_<run_id>/
-    test_instance_<n>_result.txt                    # test instances (truth + pred.)           
-    test_instance_<last>_<r>_result.txt             # repeated inference on last inst.
-```
-
-The `.tex` report is written with filled tables.
 
 ### Loading a previously trained model
 
-Generally the module will check in the `/models` directory for pretrained modules with the specified run_id. If such model is available, training will be skipped and the loaded model will be used.
+By default, `run_automated_pipeline` checks the `models/` directory for a
+pretrained model matching the given `run_id`. If found, training is
+skipped and the saved weights are loaded instead.
 
-However, it can be done manually as well:
+It can also be done manually:
 ```julia
 using Thesis, Flux
 
@@ -211,20 +220,22 @@ subtype the relevant abstract type, implement its required functions, then
 register the file in `src/Thesis.jl`:
 
 - **New diffusion/flow-matching method**: subtype `Diffusion`; implement `corrupt_batch`, `p` (or the method-specific reverse step), `sample_heatmap`, and either `calculate_loss` or a custom `Thesis.compute_loss_and_gradients` overload.
-- **New scheduler**: subtype `Scheduler{T}`; provide a constructor that populates `total_steps`, `inference_steps`, and `steps` — iteration, `length`, and `collect` are inherited from the abstract type. Note that any new Scheduler must also follow the `Iterator` design pattern.
+- **New scheduler**: subtype `Scheduler{T}`; provide a constructor that populates `total_steps`, `inference_steps`, and `steps` — iteration, `length`, and `collect` are inherited from the abstract type. Note that any new Scheduler must also follow the `Iterator` design pattern (ascending by default; use `Iterators.reverse` for descending traversal).
 - **New GNN architecture**: subtype `GNN`; implement `(model::YourGNN)(g::GNNGraph, x_input::AbstractMatrix)` returning per-node logits, matching the `in_dim`/`hidden_dim`/`output_dim` contract of `GNNConfig`.
-- **New problem/solver**: subtype `ProblemSolver`; implement the solver call `(solver::YourSolver)(g::Graphs.SimpleGraph)` returning a `1×n` label matrix, and a `decode_heatmap(::YourSolver, g::GNNGraph, heatmap::AbstractVector)` method for problem specific decoding.
+- **New problem/solver**: subtype `ProblemSolver`; implement the solver call `(solver::YourSolver)(g::Graphs.SimpleGraph)` returning a `1×n` label matrix, and `decode_heatmap`/`evaluate` methods dispatched on your solver type for problem-specific decoding and scoring.
 - **New graph generator**: subtype `GraphGenerator`; implement `(gen::YourGenerator)()` returning a `Graphs.SimpleGraph`.
+
 ---
 
 ## Testing
 
 Tests are written with `TestItems.jl`/`TestItemRunner.jl` under
-`src/tests/cases/`.
+`test/cases/`.
 
 ```bash
-julia --project=. src/tests/testrunner.jl
+julia --project=. test/runtests.jl
 ```
 
 This runs all test items except those tagged `:job` (used for long-running
-GPU/cluster jobs rather than unit tests).
+GPU/cluster jobs rather than unit tests). A GPU is required, since most
+tests exercise CUDA-resident code paths directly.
