@@ -57,14 +57,15 @@ function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
         for i in 1:T
             t_i, t_im1 = t_full[i + 1], t_full[i]
             Δ_i = norm(vec(lookup_x(t_i)) .- vec(lookup_x(t_im1)))
-            α_ti, σ_ti = κ(t_i), 1f0 - κ(t_i)
+            α_ti = κ(t_i)
+            σ_ti = max(1f0 - κ(t_i), 1f-6)
             ε̃_i = σ_ti^atss_p / max(α_ti, 1f-6)
-            λ_i = log(max(α_ti, 1f-6) / max(σ_ti, 1f-6))
+            λ_i = log(max(α_ti, 1f-6) / σ_ti)
             total += ε̃_i * exp(λ_i) * Δ_i
             if i <= T - 1
                 λ_interior[i] = λ_i
             end
-        end
+        end    
         return total, λ_interior
     end
 

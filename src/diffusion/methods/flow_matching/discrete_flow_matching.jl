@@ -7,6 +7,7 @@ using Flux
 using Statistics
 using Random
 using CUDA
+using Functors
 
 export DiscreteFlowMatching
 
@@ -29,6 +30,8 @@ struct DiscreteFlowMatching <: Diffusion
     κ::Function # interpolation function of the scheduler
     κ̇ ::Function # derivative of κ
 end
+
+Functors.@leaf DiscreteFlowMatching
 
 """
     uₜ(diffusion::DiscreteFlowMatching, x_t::AbstractArray, p₁ₜ::AbstractArray, t)
@@ -232,18 +235,6 @@ function L_cons(u_t::AbstractArray, u_t_next::AbstractArray)
 end
 
 """
-    _build_model_input(gnn, x::AbstractArray, timesteps::AbstractVector, gi, time_dim::Int)
-
-Helper function to construct the neural network input matrix by concatenating 
-the state with broadcasted sinusoidal timestep embeddings.
-"""
-function _build_model_input(gnn, x::AbstractArray, timesteps::AbstractVector, gi, time_dim::Int)
-    t_emb = Thesis.get_timestep_embedding(timesteps, time_dim)
-    t_emb_nodes = isnothing(gi) ? repeat(t_emb, 1, size(x, 2)) : t_emb[:, gi]
-    return vcat(t_emb_nodes, x)
-end
-
-"""
     _nodewise_tau(timesteps::AbstractVector, T::Int, gi, num_nodes::Int, shp)
 
 Helper function to broadcast normalized continuous time values τ to all nodes 
@@ -286,8 +277,7 @@ function Thesis.compute_loss_and_gradients(gnn::GNN, method::DiscreteFlowMatchin
     time_dim = gnn.config.in_dim - x_dim
     gi = batch.graph_indicator
     T = method.scheduler.total_steps
-    
-    x_input_t = _build_model_input(gnn, x_t, timesteps, gi, time_dim)
+    x_input_t = Thesis.build_model_input(x_t, timesteps, time_dim, gi)
 
     timesteps_next = min.(T, timesteps .+ 1)
     shp = _time_shape(x_1, isnothing(gi) ? size(x_1, 2) * length(timesteps) : length(gi))
@@ -296,7 +286,7 @@ function Thesis.compute_loss_and_gradients(gnn::GNN, method::DiscreteFlowMatchin
     τ_next_r = _nodewise_tau(timesteps_next, T, gi, size(x_1, 2), shp)
 
     x_t_next = forward_transition_step(method, x_t, x_1, τ_r, τ_next_r)
-    x_input_t_next = _build_model_input(gnn, x_t_next, timesteps_next, gi, time_dim)
+    x_input_t_next = Thesis.build_model_input(x_t_next, timesteps_next, time_dim, gi)
 
     # Eq. 11 (total loss = l_dfm + λ_cons * L_cons)
     loss, grads = Flux.withgradient(gnn) do gnn_inner
