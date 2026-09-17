@@ -13,6 +13,8 @@ export RuntimeDataset, GraphGenerator, ProblemSolver
     GraphGenerator
 
 Wrapper for a generic graph generator.
+
+#GR TODO Konkret erwartete Methoden ausspezifizieren.
 """
 abstract type GraphGenerator end
 
@@ -20,13 +22,17 @@ abstract type GraphGenerator end
     ProblemSolver
 
 Wrapper for a generic problem solver. Must implement a solver and a heatmap decoder.
+
+#GR TODO Konkret erwartete Methoden ausspezifizieren.
 """
 abstract type ProblemSolver end
 
 """
     RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
     
-Dataset that is solved during runtime. It uses the generator to create instances on-the-fly in an asynchron manner and solves them with the provided solver. A buffer keeps solved instances so they can be provided in batches without any wait (if possible).
+Dataset that is solved during runtime. 
+
+It uses the generator to create instances on-the-fly in an asynchron manner and solves them with the provided solver. A buffer keeps solved instances so they can be provided in batches without any wait (if possible).
 """
 struct RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
     num_instances::Int
@@ -37,6 +43,7 @@ end
 
 """
     RuntimeDataset(num_instances, generator, solver; max_concurrent_solves=2, buffer_capacity=4*max_concurrent_solves)
+    #GR TODO Bitte beachten, dass diese Beschreibung auch mit der Implementierung übereinstimmt, das ist hier nicht der Fall.
 
 Constructor of a RuntimeDataset.
 
@@ -44,9 +51,11 @@ Parameters:
     - 'num_instances': The number of instances in the set.
     - 'generator': The generator that is used for generating instances.
     - 'solver': The solver that is used for solving the generated instances.
-    - 'max_concurrent_solves': The maximum solvers that are available. For Gurobi academic usage this is 2.
+    - 'max_concurrent_solves': The maximum solvers that are available. For Gurobi academic usage this is 2.  #GR TODO das interessiert uns nicht, wir haben diese Beschränkung nicht
     - 'buffer_capacity': Defines the buffer size that is kept in the dataset. Defaults to 3 times the solver capacity.
 """
+#GR TODO Diese Parallelisierung auf 2 Threads ist sehr halbherzig. Entweder den Ball flach halten und einfach nur in einem Thread arbeiten (man kann einem Gurobi Call ja auch immer noch mehrere Threads erlauben!), oder aber gleich sauber, sodass wir auf unserem Cluster in mehreren Prozessen parallel Daten generieren können, die dann aber auch in Files abgelegt werden sollten. Letzteres wäre natürlich die wirklich saubere Lösung.
+# Diese asynchonen Threads haben auch noch einen anderen riesigen Nachteil: Reproduzierbarkeit is praktisch nicht möglich. Diese ist aber zum potentiellen Debuggen in der Zukunft extrem wichtig. Daher sollten die Instanzgenerierung auch über einen Seed-Parameter deterministisch gemacht werden können.
 function RuntimeDataset(num_instances::Int, generator::G, solver::P;
                          max_concurrent_solves::Int=2,
                          buffer_capacity::Int=3 * max_concurrent_solves) where {G<:GraphGenerator, P<:ProblemSolver}
@@ -55,7 +64,7 @@ function RuntimeDataset(num_instances::Int, generator::G, solver::P;
     for _ in 1:max_concurrent_solves
         Threads.@spawn begin
             n = 0
-            while true
+            while true  #GR TODO Diese Threads laufen ewig weiter, auch wenn das Training schon beendet ist, das ist nicht sauber.
                 try
                     g = generator()
                     x_0 = solver(g)

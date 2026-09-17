@@ -19,7 +19,7 @@ struct MISPSolver <: ProblemSolver
     time_limit::Float64
 end
 
-
+#GR TODO Warum mehrere Gurobi.Envs? Bitte nur eines verwenden, mehrere machen nur Sinn wenn man Threads verwendet. Abgesehen davon gehört das nicht hierher, da das nicht MISP-spezifisch ist. Es ist auch keine "Naturkonstante", dass es genau 2 Lizenzen gibt (wir haben glaube ich am Cluster keine Einschränkungen).
 const NUM_GUROBI_LICENSES = 2 
 const GRB_ENV_POOL = Channel{Gurobi.Env}(NUM_GUROBI_LICENSES)
 const GRB_ENV = Ref{Gurobi.Env}()
@@ -52,6 +52,7 @@ to `ILP!`/`NSPInstance{MIS}`.
 Retries once with a fresh `Gurobi.Env()` if the WLS connection drops mid-solve;
 a poisoned environment is discarded and replaced in the background
 (`GRB_ENV_POOL`) rather than returned to the pool.
+#GR TODO Bitte keine derartigen persönlichen Setup-spezifischen Hacks im Package. Bei einem ordentlichen Setup habe ich es nie erlebt, dass man derartige Kunstgriffe benötigt.
 
 Parameters:
     - 'g': The graph instance to solve MISP for.
@@ -91,10 +92,10 @@ function (solver::MISPSolver)(g::Graphs.SimpleGraph)
             apply_solution!(sol)
             env = new_env
             is_poisoned = false
-        catch recovery_e
+        catch recovery_e  #GR TODO Wenn Gurobi mit einem anderen Fehler terminiert, z.B. weil in der Zeit gar keine gültige Lösung gefunden wurde, dann laden wir doch auch in diesem Zwei, oder? Bei unerwarteten Exceptions von ILP! jedenfalls sauber terminieren! Hier sehe ich die Gefahr, dass nach dem zweiten Versuch eine unülgige bzw. all-Zero Lösung zurückgegeben und mit dieser weitergearbeitet wird!
             @error "WLS recovery failed. Network connection is completely offline." exception=recovery_e
         end
-    finally
+    finally  #GR TODO all das macht in einem allgemeinen Package keinen Sinn, schon gar nicht wenn es hier nur um das MISP geht.
         if !is_poisoned
             put!(GRB_ENV_POOL, env)
         else

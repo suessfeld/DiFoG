@@ -7,6 +7,7 @@ using JuMP
 
 export MaxCutSolver
 
+#GR TODO Siehe meine Anmerkungen in misp.jl. Es ist nur ein globales Gurobi.Env() nötig!
 """
     MaxCutSolver <: ProblemSolver
     

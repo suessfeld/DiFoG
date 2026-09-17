@@ -15,6 +15,7 @@ export DiscreteFlowMatching
     DiscreteFlowMatching <: Diffusion
 
 Struct to hold parameters for Discrete Flow Matching.
+
 Implements the discrete flow matching framework for combinatorial optimization 
 as described in the EFLOCO paper.
 
@@ -201,6 +202,7 @@ function sample_heatmap(diffusion::DiscreteFlowMatching, model, shape::Tuple, g:
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
     t_batch = CUDA.fill(Int32(diffusion.scheduler.total_steps), batch_size)
 
+    #GR Warum hier das Modell nochmals inferenzen, hier ist beim Training bei t = T κ(1) = 1 und damit  der Trainingsinput genau gleich dem Target, d.h. das Modell lernt die Identitätsfunktion?
     logits = model(x, t_batch, g)
     return Flux.sigmoid.(logits)
 end
@@ -308,3 +310,45 @@ function Thesis.compute_loss_and_gradients(gnn::GNN, method::DiscreteFlowMatchin
 
     return loss, (Thesis._mat(grads[1]),)
 end
+
+
+#GR TODO Claude liefert in Bezug auf die Kernfunktionalität folgende Meldungen, und ich denke vieles darin ist sehr begründet. Bitte dem sorgfältig nachgehen und hier dokumentieren, wie das gefixed wurde bzw. warum vielleicht manches ungerechtfertigt ist.
+
+
+# - **B1** DFM consistency branch uses a biased commit proxy: `already_committed = x_t .== x_1`
+#   (`discrete_flow_matching.jl:75`) although `corrupt_batch` has the exact mask (`:115`) and discards it.
+#   About half the uncommitted entries are frozen; with κ = 0.2, κ_next = 0.5 the code yields
+#   P(x_next = x_1) = 0.875 instead of 0.75, so `L_cons` compares velocities at states from different
+#   marginals. The test (`test_flow_matching.jl:54-57`) uses `x_1 = 1, x_t = 0` and never hits the branch.
+# - **B2** `L_cons` gradient flows through both forward passes (`:292-306`); no stop-gradient on the
+#   target branch. Check against EFLOCO eq. 10; as written the two predictions can collapse toward each
+#   other. The velocity clamp at ±100 also lets `mse` reach ~10⁴ against an O(1) `l_dfm`.
+# - **B3** DFM inference queries `t_idx = 0` on its first step (`:143,193`) while training samples
+#   `t ∈ 1:T`.
+# - **B4** β endpoints (1e-4, 2e-2) are not scaled with `total_steps` (`get_betas`); with T = 100 (all
+#   tests) ᾱ_T ≈ 0.135, so q(x_T | x_0) is far from the Bernoulli(0.5) prior the sampler starts from.
+# - **B5** `CosineScheduler`/`LinearScheduler` change only the inference spacing; the noise schedule is
+#   always linear (`get_betas` ignores its argument except `total_steps`), contrary to the docstrings
+#   ("cosine denoising schedule as used in DIFUSCO", "corruption ratio values from the assigned
+#   scheduler").
+# - **B6** `Base.convert(::Type{Scheduler{T}}, s)` (`linear.jl:63`, `cosine.jl:64`, `atss.jl:216`) makes
+#   `BernoulliDiffusion(CosineScheduler(Float32, …))` silently recompute an Int schedule, contradicting
+#   the README's "requires" statements; for ATSS the rounding creates duplicates.
+# - **B7** `_embed_timesteps(t_emb, ::Nothing, x_t)` repeats N times even when N per-node timesteps were
+#   passed (`diffusion_model.jl:22-26`), although the docstring advertises per-node input.
+# - **B8** `feature_dim` is derived independently in `DiffusionModel` (`in_dim − size(x_t,1)`) and
+#   `AGNN.feature_dim`; a mismatch silently feeds a time-embedding row as state. No assert.
+# - **B9** Samplers hard-code the start time instead of reading `first(scheduler)` /
+#   `first(Iterators.reverse(scheduler))`; a scheduler not starting at 0/ending at T silently skips a step.
+# - **B10** `Base.collect(s::Scheduler) = s.steps` aliases the internal vector; ATSS never validates
+#   `inference_steps < total_steps` and its initial guess may contain duplicates.
+# - **B11** `posterior_prob` denominators `0.5(1 − ᾱ_t)` are unguarded for small t (Float32
+#   cancellation); output is only clamped afterwards.
+
+# - **B11a** Duplicate inference steps: `CosineScheduler(100, 40)` yields `…, 99, 99, 100` (`cosine.jl:39`),
+#   each duplicate a full no-op GNN pass; ATSS Int conversion has no `max(1, …)` floor, so `steps ==
+#   [0, 0, …]` is possible and the final Bernoulli step then calls `posterior_prob(…, t=0, s=0)` →
+#   `αs[0:0]` → `BoundsError`. `ATSSScheduler.κ̇` is stored but never read. Coordinate descent in
+#   `_minimize_atss_schedule` does a single sweep and `sort!(trial)` shifts coordinate indices after an
+#   accepted move. A user `κ` returning Float64 silently promotes the whole DFM corruption/velocity path to
+#   Float64 on the GPU (`discrete_flow_matching.jl:112`).

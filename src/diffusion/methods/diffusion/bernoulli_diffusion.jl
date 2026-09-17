@@ -223,6 +223,7 @@ function sample_heatmap(diffusion::BernoulliDiffusion, model, shape::Tuple, g::G
     batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
     t_batch = CUDA.fill(Int32(1), batch_size)
 
+    #GR TODO Diesen Extraaufruf verstehe ich nicht. Wir haben hier als x einen bereits binären Vektor, der nochmals durch das Model geschickt wird um Wahrscheinlichkeiten zu erhalten? Das ergibt für mich keinen Sinn. Sollte nicht term_1 vom letzten Entrauschungsschritt als sinnvolle Heatmap zurückgegeben werden? So wie es aktuell aussieht sind die gemessenen Heatmap-Metriken relativ bedeutungslos. Ich denke, dass das z.B. in DIFUSCO auch nicht so gemacht wird.
     logits = model(x, t_batch, g)
     return Flux.sigmoid.(logits)
 end

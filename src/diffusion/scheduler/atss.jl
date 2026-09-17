@@ -215,3 +215,18 @@ end
 
 Base.convert(::Type{Scheduler{VT}}, s::ATSSScheduler) where {VT} = ATSSScheduler(VT, s)
 Base.convert(::Type{ATSSScheduler{VT}}, s::ATSSScheduler) where {VT} = ATSSScheduler(VT, s)
+
+
+#GR TODO Was sagen Sie zu folgendem Punkt, den Claude hier anmerkt?
+# ATSS scheduling objective is degenerate and pushes all interior steps toward t = 1.**
+# `atss.jl:62-64`: `ε̃_i·exp(λ_i)·Δ_i` simplifies to `σ(t_i)^(p−1)·Δ_i`, identically `Δ_i` for the default
+# `atss_p = 1`. Because `_atss_schedule` (`atss.jl:160-164`) redraws fresh noise for every uncommitted
+# entry at every fine step, `E‖x_{t_i} − x_{t_{i−1}}‖` depends only on the left endpoint, not on the gap,
+# so the cost is monotone decreasing in every interior t_j and coordinate descent piles them up near 1.
+# The author's own comment in `discrete_flow_matching.jl:52` ("ATSS pushes steps towards 1, which results
+# in extreme values") is the symptom, and the `±100` clamp on the velocity scale is the band-aid. After
+# Int conversion, clustered steps round to duplicates; `posterior_prob` with `t == s` is an exact
+# identity, so ATSS + Bernoulli runs perform far fewer real denoising steps than `inference_steps`. The
+# schedule is also fitted from one graph, one solver call and one trajectory (`atss.jl:145-146`), and
+# `_lambda_inverse` merely inverts a λ that was computed from the chosen t (identity plus bisection error).
+# The surrogate needs a gap-dependent weight (Δλ or ‖Δx‖/Δt) and a coupled trajectory.

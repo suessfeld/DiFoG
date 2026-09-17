@@ -9,7 +9,7 @@ export Scheduler
 
 An abstract implementation of a scheduler. Implementations can either be of type Int or Float32 depending on the chosen diffusion method. It implements the iterator pattern, thus a Scheduler is designed to be iterated upon, returning the defined scheduling steps.    
 """
-abstract type Scheduler{T} end
+abstract type Scheduler{T} end  #GR TODO Name Clash mit MHLib.Scheduler, bitte umbenennen
 
 Base.length(s::Scheduler) = max(0, length(s.steps))
 Base.collect(s::Scheduler) = s.steps # use collect to just get the entire step vector
