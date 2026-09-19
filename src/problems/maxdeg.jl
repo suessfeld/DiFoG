@@ -13,7 +13,12 @@ A solver that solves the Maximum Degree Problem.
 """
 struct MaxDegSolver <: ProblemSolver end
 
-function (::MaxDegSolver)(g::Graphs.SimpleGraph)
+"""
+    (solver::MaxDegSolver)(g::Graphs.SimpleGraph)
+
+MaxDeg is solved exactly (argmax over degrees), hence gap = 0.
+"""
+function (solver::MaxDegSolver)(g::Graphs.SimpleGraph)
     v = nv(g)
     
     degs = degree(g)
@@ -25,7 +30,7 @@ function (::MaxDegSolver)(g::Graphs.SimpleGraph)
         x_0[1, idx] = 1.0f0
     end
     
-    return x_0
+    return x_0, 0.0
 end
 
 """

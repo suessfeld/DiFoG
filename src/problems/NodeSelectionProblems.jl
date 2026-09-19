@@ -442,7 +442,8 @@ function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing;
         silent=false, time_limit=inst.config.ilp_time_limit, 
         obj_limit::Union{Nothing,Real}=nothing,
         warn_time_limit::Bool=true,
-        env::Gurobi.Env=GRB_ENV[]) where P <: NodeSelectionProblem   # NEW — env kwarg
+        env::Gurobi.Env=GRB_ENV[],
+        threads::Int=1) where P <: NodeSelectionProblem
         
     @assert P ∈ (MIS, MCP, MAXCUT, DkS)
     n = inst.n
@@ -510,7 +511,7 @@ function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing;
         model = inst.ilp_model[]
     end
     x = model[:x]  # make model variables accessible
-    MOI.set(model, MOI.NumberOfThreads(), 1)
+    MOI.set(model, MOI.NumberOfThreads(), threads)
     # add user defined termination criterion on the objective value 
     !isnothing(obj_limit) && set_optimizer_attribute(model, "BestObjStop", obj_limit)
 

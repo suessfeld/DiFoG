@@ -101,6 +101,10 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
     @info "Starting training"
 
     for epoch in 1:epochs
+        if epoch > 1 && data_loader.data isa RuntimeDataset
+            Thesis.reset!(data_loader.data)
+        end
+
         epoch_loss = 0.0f0
         num_batches = 0
         total_instances = 0

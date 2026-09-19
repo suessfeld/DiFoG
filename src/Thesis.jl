@@ -6,9 +6,11 @@ using GraphNeuralNetworks
 using Statistics
 using Logging
 using MHLib
+using Random
 
 
 include("./utils/logging_utils.jl")
+include("./utils/gurobi_session.jl")
 
 include("./diffusion/diffusion.jl")
 include("./diffusion/scheduler.jl")
@@ -26,6 +28,7 @@ include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
 
 include("./utils/data/data_utils.jl")
 include("./utils/data/runtime_dataset.jl")
+include("./utils/data/seeding.jl")  
 
 include("./diffusion/scheduler/linear.jl")
 include("./diffusion/scheduler/cosine.jl")

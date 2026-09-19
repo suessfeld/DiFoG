@@ -25,7 +25,7 @@ function ERGraphGenerator(; min_nodes::Int=50, max_nodes::Int=100, p::Float64=0.
     return ERGraphGenerator(min_nodes, max_nodes, p)
 end
 
-function (gen::ERGraphGenerator)()
-    v = rand(gen.min_nodes:gen.max_nodes)
-    return generate_er_graph(v, gen.p)
+function (gen::ERGraphGenerator)(rng::AbstractRNG=Random.default_rng())
+    v = rand(rng, gen.min_nodes:gen.max_nodes)
+    return generate_er_graph(v, gen.p; rng)
 end

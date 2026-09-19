@@ -143,7 +143,7 @@ function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
     end                                       # line 4
 
     g   = generator()
-    x_1 = solver(g)                          # target solution, shape (1, n)
+    x_1, _ = solver(g)                       # target solution, shape (1, n)
     n   = size(x_1, 2)
 
     x_traj = Vector{Matrix{Float32}}(undef, total_steps + 1)   # x_traj[i+1] = x_{t_i}

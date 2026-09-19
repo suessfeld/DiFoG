@@ -19,108 +19,38 @@ struct MISPSolver <: ProblemSolver
     time_limit::Float64
 end
 
-#GR TODO Warum mehrere Gurobi.Envs? Bitte nur eines verwenden, mehrere machen nur Sinn wenn man Threads verwendet. Abgesehen davon gehört das nicht hierher, da das nicht MISP-spezifisch ist. Es ist auch keine "Naturkonstante", dass es genau 2 Lizenzen gibt (wir haben glaube ich am Cluster keine Einschränkungen).
-const NUM_GUROBI_LICENSES = 2 
-const GRB_ENV_POOL = Channel{Gurobi.Env}(NUM_GUROBI_LICENSES)
-const GRB_ENV = Ref{Gurobi.Env}()
-
-function _init_gurobi_env!()
-    for _ in 1:NUM_GUROBI_LICENSES
-        try
-            put!(GRB_ENV_POOL, Gurobi.Env())
-        catch e
-            @error "Failed to initialize Gurobi Environment during startup" exception=e
-        end
-    end
-
-    try
-        GRB_ENV[] = Gurobi.Env()
-    catch e
-        @error "Failed to initialize shared Gurobi Environment (GRB_ENV) for NodeSelectionsProblems.jl" exception=e
-    end
-    return
-end
-
 MISPSolver(; time_limit::Float64=0.5) = MISPSolver(time_limit)
 
 """
     (solver::MISPSolver)(g::Graphs.SimpleGraph)
 
-Solves MISP for `g` via Gurobi. Delegates the ILP formulation
-to `ILP!`/`NSPInstance{MIS}`.
-
-Retries once with a fresh `Gurobi.Env()` if the WLS connection drops mid-solve;
-a poisoned environment is discarded and replaced in the background
-(`GRB_ENV_POOL`) rather than returned to the pool.
-#GR TODO Bitte keine derartigen persönlichen Setup-spezifischen Hacks im Package. Bei einem ordentlichen Setup habe ich es nie erlebt, dass man derartige Kunstgriffe benötigt.
+Solves MISP for `g` via Gurobi. Delegates ILP formulation to `ILP!`/`NSPInstance{MIS}`, and session
+management/retry to `with_gurobi_retry` (see `gurobi_session.jl`) — this function only describes how
+to build and read out a MISP solve; it knows nothing about sessions or retries.
 
 Parameters:
     - 'g': The graph instance to solve MISP for.
 """
 function (solver::MISPSolver)(g::Graphs.SimpleGraph)
     n = nv(g)
-    env = take!(GRB_ENV_POOL)
     x_0 = zeros(Float32, 1, n)
-    is_poisoned = false
+    gap = NaN
 
-    function build_and_solve(current_env)
-        inst = NSPInstance(
-            MIS(0), g, n, ne(g),
-            Ref{Union{Nothing, JuMP.Model}}(nothing),
-            (;),
-        )
-        return ILP!(inst; silent=true, time_limit=solver.time_limit,
-                     warn_time_limit=false, env=current_env)
+    result = with_gurobi_retry() do env
+        inst = NSPInstance(MIS(0), g, n, ne(g), Ref{Union{Nothing, JuMP.Model}}(nothing), (;))
+        ILP!(inst; silent=true, time_limit=solver.time_limit, warn_time_limit=false,
+             env=env, threads=GRB_THREADS[])
     end
 
-    function apply_solution!(sol)
+    if !isnothing(result)
+        sol, status, rel_gap, solve_time = result
         for i in 1:sol.sel
             x_0[1, sol.x[i]] = 1.0f0
         end
+        gap = Float64(rel_gap)
     end
 
-    try
-        sol, status, rel_gap, solve_time = build_and_solve(env)
-        apply_solution!(sol)
-    catch opt_e
-        @warn "Gurobi Token/Network Dropped. Discarding environment and attempting recovery..." exception=opt_e
-        is_poisoned = true
-
-        try
-            new_env = Gurobi.Env()
-            sol, status, rel_gap, solve_time = build_and_solve(new_env)
-            apply_solution!(sol)
-            env = new_env
-            is_poisoned = false
-        catch recovery_e  #GR TODO Wenn Gurobi mit einem anderen Fehler terminiert, z.B. weil in der Zeit gar keine gültige Lösung gefunden wurde, dann laden wir doch auch in diesem Zwei, oder? Bei unerwarteten Exceptions von ILP! jedenfalls sauber terminieren! Hier sehe ich die Gefahr, dass nach dem zweiten Versuch eine unülgige bzw. all-Zero Lösung zurückgegeben und mit dieser weitergearbeitet wird!
-            @error "WLS recovery failed. Network connection is completely offline." exception=recovery_e
-        end
-    finally  #GR TODO all das macht in einem allgemeinen Package keinen Sinn, schon gar nicht wenn es hier nur um das MISP geht.
-        if !is_poisoned
-            put!(GRB_ENV_POOL, env)
-        else
-            @warn "Discarded poisoned Gurobi environment. Re-allocating placeholder to maintain license pool..."
-            Threads.@spawn begin
-                sleep(5)
-                try
-                    recovered_env = Gurobi.Env()
-                    put!(GRB_ENV_POOL, recovered_env)
-                    @info "Successfully restored license slot to pool."
-                catch e
-                    @error "Could not restore license slot. Retrying connection later." exception=e
-                    sleep(10)
-                    try
-                        recovered_env = Gurobi.Env()
-                        put!(GRB_ENV_POOL, recovered_env)
-                    catch second_e
-                        @error "Critical: Environment slot permanently lost until network restores." exception=second_e
-                    end
-                end
-            end
-        end
-    end
-
-    return x_0
+    return x_0, gap
 end
 
 """
