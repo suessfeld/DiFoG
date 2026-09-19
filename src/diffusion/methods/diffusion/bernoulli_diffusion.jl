@@ -27,7 +27,8 @@ Functors.@leaf BernoulliDiffusion
 """
     get_betas(scheduler::Scheduler)
 
-Gets the corruption ratio values from the assigned scheduler (for each step). Length is dependent on the configured stepsize (total_steps) in the scheduler.
+Gets the noise-schedule β values for the forward corruption process q(x_t | x_0), one per step.
+Length is `scheduler.total_steps`.
 
 Parameters:
     - 'scheduler': The scheduler used.
@@ -64,7 +65,6 @@ Parameters:
     - 't': The timestep which is relevant for the current step. In vector format for parallelization.
 """
 function q(diffusion::BernoulliDiffusion, x_0::AbstractArray, t::AbstractVector{<:Integer})
-    # FIX: Move the alphas to the GPU BEFORE indexing with the GPU array `t`
     αs = get_alphas(diffusion.scheduler) |> Flux.gpu
     ᾱₜ = αs[t]
     
@@ -105,7 +105,7 @@ function corrupt_batch(diffusion::BernoulliDiffusion, x_0::AbstractArray, g::GNN
     end
     
     corrupted_x = q(diffusion, x_0, t_nodes)
-    return corrupted_x, t_device, x_0
+    return corrupted_x, t_device, x_0, nothing
 end
 
 
@@ -155,12 +155,12 @@ function posterior_prob(diffusion::BernoulliDiffusion, x_t::AbstractArray, x_0_p
     # eq 5 evaluated for x_0 = 1: q(x_{t-1}=1 | x_t, x_0=1)
     # => ( q(x_t | x_{t-1}=1) * q(x_{t-1}=1 | x_0=1) ) / q(x_t | x_0=1)
     term_2 = (term_1 .* 0.5f0 .* (1.0f0 .+ ᾱₛ)) ./
-             (x_t .* 0.5f0 .* (1.0f0 .+ ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 .- ᾱₜ))
+             max.(x_t .* 0.5f0 .* (1.0f0 .+ ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 .- ᾱₜ), 1f-6)
     
     # eq 5 evaluated for x_0 = 0: q(x_{t-1}=1 | x_t, x_0=0)
     # =>( q(x_t | x_{t-1}=1) * q(x_{t-1}=1 | x_0=0) ) / q(x_t | x_0=0)
     term_3 = (term_1 .* 0.5f0 .* (1.0f0 .- ᾱₛ)) ./
-             (x_t .* 0.5f0 .* (1.0f0 .- ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 .+ ᾱₜ))
+             max.(x_t .* 0.5f0 .* (1.0f0 .- ᾱₜ) .+ (1.0f0 .- x_t) .* 0.5f0 .* (1.0f0 .+ ᾱₜ), 1f-6)
     
     # eq 6 p_θ(x_{t-1}=1 | x_t)
     term_4 = x_0_pred .* term_2 .+ (1.0f0 .- x_0_pred) .* term_3
@@ -186,13 +186,13 @@ function p(diffusion::BernoulliDiffusion, model, x_t::AbstractArray, t::Int, s::
     t_batch = CUDA.fill(Int32(t), batch_size)
     
     logits = model(x_t, t_batch, g)
-    term_1 = Flux.sigmoid.(logits)
-    term2 = posterior_prob(diffusion, x_t, term_1, t, s)
+    x_0_pred = Flux.sigmoid.(logits)
+    posterior = posterior_prob(diffusion, x_t, x_0_pred, t, s)
     
     noise = CUDA.rand(Float32, size(x_t))
-    x_s = ifelse.(noise .< term2, 1.0f0, 0.0f0)
+    x_s = ifelse.(noise .< posterior, 1.0f0, 0.0f0)
     
-    return x_s
+    return x_s, x_0_pred
 end
 
 
@@ -214,16 +214,13 @@ function sample_heatmap(diffusion::BernoulliDiffusion, model, shape::Tuple, g::G
     τ_current = diffusion.scheduler.total_steps
 
     @debug "Scheduler State" (; (f => getfield(diffusion.scheduler, f) for f in fieldnames(typeof(diffusion.scheduler)))...)
+
+    x_0_pred = nothing
     # iterates as defined by the scheduler
     for τ_prev in Iterators.drop(Iterators.reverse(diffusion.scheduler), 1)
-        x = p(diffusion, model, x, τ_current, τ_prev, g)
+        x, x_0_pred = p(diffusion, model, x, τ_current, τ_prev, g)
         τ_current = τ_prev
     end
 
-    batch_size = hasproperty(g, :num_graphs) ? g.num_graphs : 1
-    t_batch = CUDA.fill(Int32(1), batch_size)
-
-    #GR TODO Diesen Extraaufruf verstehe ich nicht. Wir haben hier als x einen bereits binären Vektor, der nochmals durch das Model geschickt wird um Wahrscheinlichkeiten zu erhalten? Das ergibt für mich keinen Sinn. Sollte nicht term_1 vom letzten Entrauschungsschritt als sinnvolle Heatmap zurückgegeben werden? So wie es aktuell aussieht sind die gemessenen Heatmap-Metriken relativ bedeutungslos. Ich denke, dass das z.B. in DIFUSCO auch nicht so gemacht wird.
-    logits = model(x, t_batch, g)
-    return Flux.sigmoid.(logits)
+    return x_0_pred
 end

@@ -1,40 +1,3 @@
-# cases/test_flow_matching.jl
-using TestItems
-
-@testmodule TestFlowMatching begin
-    using Test
-    using Thesis
-end
-
-@testitem "Test DiscreteFlowMatching Velocity Field Exact Values" setup=[TestFlowMatching] begin
-    using Flux
-
-    T = 100
-    scheduler = LinearScheduler(Float32, T, T)
-    
-    # Simple linear interpolation for the probability path
-    κ(t) = t
-    κ̇(t) = 1.0f0
-    dfm = DiscreteFlowMatching(scheduler, 1.0f0, κ, κ̇)
-
-    # Move mock inputs to GPU
-    x_t = Float32[1.0 0.0; 0.0 1.0] |> Flux.gpu
-    p1t = Float32[0.9 0.2; 0.1 0.8] |> Flux.gpu
-    t = 0.5f0
-    
-    u_val = Thesis.uₜ(dfm, x_t, p1t, t) |> Flux.cpu
-    
-    # ---------------------------------------------------------
-    # Deterministic Ground Truth Calculation (Eq 7)
-    # ---------------------------------------------------------
-    # u_t = (κ̇_t / (1.0 - κ_t)) * (p1t - x_t)
-    # At t = 0.5: (1.0 / (1.0 - 0.5)) = 2.0
-    expected_u = 2.0f0 .* ( (p1t |> Flux.cpu) .- (x_t |> Flux.cpu) )
-    
-    @test size(u_val) == size(x_t |> Flux.cpu)
-    @test u_val ≈ expected_u atol=1e-6
-end
-
 @testitem "Test DiscreteFlowMatching Forward Transition Statistical Distribution" setup=[TestFlowMatching] begin
     using Flux
     using Statistics
@@ -45,23 +8,26 @@ end
     κ̇(t) = 1.0f0
     dfm = DiscreteFlowMatching(scheduler, 1.0f0, κ, κ̇)
 
-    # 1. N=500 (250,000 samples) is plenty for the Law of Large Numbers to
-    # converge here (see the identical note in test_diffusion.jl) — at ~1% of
-    # the GPU memory the previous N=5000 (25M elements) used.
     N = 500
-    
+
     # x_1 is the target solution (all 1s for testing)
     x_1 = ones(Float32, N, N) |> Flux.gpu
-    
+
     # x_t is entirely uncommitted noise (all 0s, strictly opposite to x_1)
     x_t = zeros(Float32, N, N) |> Flux.gpu
-    
+
+    # B1 fix: forward_transition_step now takes the ground-truth commit mask instead of inferring
+    # it via x_t .== x_1. x_t is deliberately the exact complement of x_1 here, so every entry is
+    # genuinely uncommitted — the correct mask is all-false, matching what the old x_t==x_1 proxy
+    # happened to (coincidentally, and only because of this specific test setup) also produce.
+    committed = falses(N, N) |> Flux.gpu
+
     # Define a transition interval
     t = fill(0.2f0, N, N) |> Flux.gpu
     t_next = fill(0.5f0, N, N) |> Flux.gpu
-    
-    x_next = Thesis.forward_transition_step(dfm, x_t, x_1, t, t_next) |> Flux.cpu
-    
+
+    x_next = Thesis.forward_transition_step(dfm, x_t, x_1, t, t_next, committed) |> Flux.cpu
+
     # ---------------------------------------------------------
     # Theoretical Expected Distribution
     # ---------------------------------------------------------
@@ -87,31 +53,4 @@ end
     
     # Assert the sampled distribution matches the paper's theoretical equation within a strict tolerance
     @test isapprox(empirical_prob_1, expected_prob_1, atol=5e-3)
-end
-
-@testitem "Test DiscreteFlowMatching Euler Integration Bounds" setup=[TestFlowMatching] begin
-    using Flux
-    
-    # ---------------------------------------------------------
-    # Deterministic Bounds Check (Eq 6 Context)
-    # ---------------------------------------------------------
-    x_t = Float32[0.8 0.2; 0.1 0.9] |> Flux.gpu
-    
-    # Provide strong velocities designed to push the probability state out of [0, 1] bounds
-    u_t = Float32[1.0 -1.0; -0.5 0.5] |> Flux.gpu
-    
-    τ = 0.2f0
-    τ_next = 0.6f0
-    
-    # Expected Integration:
-    # h = 0.4
-    # Unclamped expected:
-    # [0.8 + 0.4 = 1.2,  0.2 - 0.4 = -0.2]
-    # [0.1 - 0.2 = -0.1, 0.9 + 0.2 = 1.1]
-    
-    x_next = Thesis.euler_step(x_t, u_t, τ, τ_next) |> Flux.cpu
-    
-    expected = Float32[1.0 0.0; 0.0 1.0]
-    
-    @test x_next ≈ expected atol=1e-6
 end

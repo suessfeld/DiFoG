@@ -29,8 +29,7 @@ _embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
 
 Single canonical assembly of a GNN forward-pass input: computes the
 sinusoidal timestep embedding, broadcasts it from one-per-graph to
-one-per-node via `gi` (or repeats it across all nodes if `gi === nothing`,
-i.e. a single unbatched graph), and concatenates it in front of the state,
+one-per-node via `gi`, and concatenates it in front of the state,
 i.e. `x_input = [t_emb; x]`.
 
 This is the single owner of the "pack timestep embedding + state into one
@@ -117,14 +116,13 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
 
         for (g_batch, names_batch) in prefetch_channel
 
-
             batch_size = length(names_batch)
             batch_time = @elapsed begin
                 g_batch = g_batch |> Flux.gpu
                 x_start = g_batch.ndata.x
-                x_t, timesteps, x_0 = corrupt_batch(model.method, x_start, g_batch)
+                x_t, timesteps, x_0, commit_mask = corrupt_batch(model.method, x_start, g_batch)
 
-                loss, grads = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0)
+                loss, grads = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0, commit_mask)
 
                 Flux.update!(optim, model.gnn, grads[1])
             end
@@ -136,6 +134,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
             @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | Loss: $(round(loss, digits=4))"
 
             epoch_loss += loss
+
         end
 
         avg_loss = epoch_loss / max(1, num_batches)
@@ -177,8 +176,8 @@ function _validation_loss(model::DiffusionModel, val_loader)
     for (g_batch, _) in val_loader
         g_batch = g_batch |> Flux.gpu
         x_start = g_batch.ndata.x
-        x_t, timesteps, x_0 = corrupt_batch(model.method, x_start, g_batch)
-        loss, _ = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0)
+        x_t, timesteps, x_0, commit_mask = corrupt_batch(model.method, x_start, g_batch)
+        loss, _ = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0, commit_mask)
         total_loss += loss
         n_batches += 1
     end
@@ -230,8 +229,12 @@ Parameters:
     -'timesteps': vector containing the diffusion timesteps for each graph in the batch
     -'batch': the batch of graphs, already on the GPU
     -'x_0': the optimal solution for loss computation
+    -'commit_mask': ignored by this generic (BernoulliDiffusion) dispatch — present only so the
+      shared training loop can call `compute_loss_and_gradients` uniformly regardless of diffusion
+      method; `DiscreteFlowMatching`'s own more-specific method (in `discrete_flow_matching.jl`)
+      actually uses it (B1 fix).
 """
-function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray)
+function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray, commit_mask=nothing)
     x_dim = size(x_t, 1)
     time_dim = gnn.config.in_dim - x_dim
     x_input = build_model_input(x_t, timesteps, time_dim, batch.graph_indicator)

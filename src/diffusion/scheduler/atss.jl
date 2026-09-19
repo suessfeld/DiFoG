@@ -134,6 +134,9 @@ function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
                          T::Int, κ::Function, atss_p::Float32,
                          total_steps::Int)
 
+    @assert T < total_steps "ATSSScheduler: inference_steps ($T) must be < total_steps ($total_steps) for adaptive schedule construction."
+    @assert T >= 1 "ATSSScheduler: inference_steps ($T) must be >= 1."
+    
     t_grid = Vector{Float32}(undef, total_steps + 1)   # line 1 (fine substrate, resolution total_steps)
     t_grid[1] = 0f0                          # line 1: t_0 = 0
     t_grid[total_steps + 1] = 1f0            # line 1: t_T = 1  (T here = total_steps, the fine grid's own endpoint)
@@ -157,11 +160,10 @@ function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
         κ_i, κ_im1 = κ(t_i), κ(t_im1)
         p_commit = clamp((κ_i - κ_im1) / max(1f0 - κ_im1, 1f-6), 0f0, 1f0)
 
-        fresh_noise  = Float32.(rand(Bool, 1, n))
         newly_commit = (.!committed) .& (rand(Float32, 1, n) .< p_commit)
         committed  .|= newly_commit
 
-        x_traj[i + 1] = ifelse.(committed, x_1, fresh_noise)
+        x_traj[i + 1] = ifelse.(committed, x_1, x_traj[1])   # B: reuse x_0, don't redraw
     end
 
     λ_interior = _minimize_atss_schedule(T, κ, atss_p, t_grid, x_traj) # line 10
@@ -178,22 +180,27 @@ end
     ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver, total_steps::Int, inference_steps::Int, κ::Function, κ̇::Function; atss_p::Float32=1.0f0) where VT
 
 Constructs an ATSSScheduler.
+
+# B6 fix (see conversation history / project notes)
+Always builds the `Float32` schedule from `_atss_schedule` first, then — if `VT === Int` — delegates
+to `ATSSScheduler(Int, s_float)` for the Int conversion, instead of separately rounding here. This
+avoids having two independent copies of the float→Int rounding/duplicate-repair logic that could
+drift out of sync; `ATSSScheduler(Int, s::ATSSScheduler{Float32})` is the single place that does it.
 """
 function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver,
                         total_steps::Int, inference_steps::Int,
                         κ::Function, κ̇::Function;
-                        atss_p::Float32=1.0f0) where VT
+                        atss_p::Float32=0.5f0) where VT
 
     if !(VT === Int || VT === Float32)
         error("ATSSScheduler only supports Scheduler{Int} or Scheduler{Float32}; got $VT")
     end
 
     steps_raw = _atss_schedule(generator, solver, inference_steps, κ, atss_p, total_steps)
+    s_float = ATSSScheduler{Float32}(total_steps, inference_steps, steps_raw, κ, κ̇, atss_p)
+    @debug "Steps from ATSSScheduler: " steps_raw
 
-    steps = VT === Int ? round.(Int, clamp.(steps_raw .* total_steps, 0, total_steps)) : steps_raw
-    @debug "Steps from ATSSScheduler: " steps
-
-    return ATSSScheduler{VT}(total_steps, inference_steps, steps, κ, κ̇, atss_p)
+    return VT === Int ? ATSSScheduler(Int, s_float) : s_float
 end
 
 ATSSScheduler(generator::GraphGenerator, solver::ProblemSolver,
@@ -203,8 +210,25 @@ ATSSScheduler(generator::GraphGenerator, solver::ProblemSolver,
 
 ATSSScheduler(::Type{VT}, s::ATSSScheduler{VT}) where {VT} = s
 
+"""
+    ATSSScheduler(::Type{Int}, s::ATSSScheduler{Float32})
+
+Converts a Float32 ATSS schedule to Int by scaling and rounding, then repairing any duplicate
+integers the rounding introduced (B6 fix — see conversation history / project notes).
+`_minimize_atss_schedule`'s own float-space search already guards against duplicates there, but
+nothing previously guarded this separate step: two close-but-distinct τ values can round to the
+same integer, silently reintroducing duplicates the float search avoided. This is the single place
+in the file that performs this conversion — the outer generator/solver-driven constructor above
+delegates here rather than duplicating the rounding logic.
+"""
 function ATSSScheduler(::Type{Int}, s::ATSSScheduler{Float32})
+    @assert length(s.steps) <= s.total_steps + 1 "ATSSScheduler: inference_steps+1 ($(length(s.steps))) exceeds available integer resolution (total_steps+1 = $(s.total_steps + 1)); cannot produce distinct integer steps."
+
     steps = round.(Int, clamp.(s.steps .* s.total_steps, 0, s.total_steps))
+    steps = accumulate((prev, cur) -> max(prev + 1, cur), steps)              # forward pass, enforce strictly increasing
+    steps[end] = min(steps[end], s.total_steps)                              # re-clamp in case the forward pass overshot
+    steps = reverse(accumulate((prev, cur) -> min(prev - 1, cur), reverse(steps)))  # backward pass, propagate that clamp (no-op if nothing overshot)
+
     return ATSSScheduler{Int}(s.total_steps, s.inference_steps, steps, s.κ, s.κ̇, s.atss_p)
 end
 
