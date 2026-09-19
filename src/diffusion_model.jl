@@ -115,15 +115,8 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
             end
         end
 
-        t_start_wait = time()
-
         for (g_batch, names_batch) in prefetch_channel
 
-            wait_time = time() - t_start_wait
-
-            if wait_time > 0.01
-                @debug "GPU Starvation Detected! Waited $(round(wait_time, digits=3))s for the next batch."
-            end
 
             batch_size = length(names_batch)
             batch_time = @elapsed begin
@@ -140,11 +133,9 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
             num_batches += 1
             total_instances += batch_size
 
-            @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | GPU Wait time (for solver): $(round(wait_time, digits=4))s"
+            @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | Loss: $(round(loss, digits=4))"
 
             epoch_loss += loss
-
-            t_start_wait = time()
         end
 
         avg_loss = epoch_loss / max(1, num_batches)

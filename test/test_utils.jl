@@ -95,6 +95,13 @@ function run_automated_pipeline(;
         @info "Saving trained model weights immediately after training completes (before test/eval, so a later crash can't discard a completed training run)..."
         Thesis.save_model(model, model_path)
         @info "Model successfully saved to $model_path"
+
+        graphs_dir = joinpath(result_root, "graphs")
+        mkpath(graphs_dir)
+        loss_plot_path = joinpath(graphs_dir, "loss-$run_id.png")
+        Thesis.plot_loss_curve(Float32.(loss_history), Float32.(val_loss_history), loss_plot_path;
+                               title="Training Loss — $run_id")
+        @info "Loss curve saved to $loss_plot_path"
     end
 
     num_params = sum(length, Flux.trainables(model.gnn))

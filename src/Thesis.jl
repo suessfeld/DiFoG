@@ -7,6 +7,7 @@ using Statistics
 using Logging
 using MHLib
 using Random
+using Plots
 
 
 include("./utils/logging_utils.jl")
@@ -22,6 +23,7 @@ include("diffusion_model.jl")
 
 include("./utils/model_utils.jl")
 include("./utils/decoding_utils.jl")
+include("./utils/plotting.jl")
 
 include("./diffusion/methods/diffusion/bernoulli_diffusion.jl")
 include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
