@@ -97,6 +97,9 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
                                  val_loader::Union{Nothing,Flux.DataLoader}=nothing)
     loss_history = Float32[]
     val_loss_history = Float32[]
+    batch_loss_history = Float32[]
+    val_loss_batches = Int[]
+    global_batch_num = 0
     @info "Starting training"
 
     for epoch in 1:epochs
@@ -129,11 +132,13 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
 
             avg_time_per_instance = batch_time / batch_size
             num_batches += 1
+            global_batch_num += 1
             total_instances += batch_size
 
             @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | Loss: $(round(loss, digits=4))"
 
             epoch_loss += loss
+            push!(batch_loss_history, Float32(loss))
 
         end
 
@@ -143,13 +148,14 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
         if !isnothing(val_loader)
             val_loss = _validation_loss(model, val_loader)
             push!(val_loss_history, val_loss)
+            push!(val_loss_batches, global_batch_num)
             @info "Epoch $epoch | Avg Train Loss: $avg_loss | Avg Val Loss: $val_loss"
         else
             @info "Epoch $epoch | Avg Loss: $avg_loss"
         end
     end
 
-    return loss_history, val_loss_history
+    return loss_history, val_loss_history, batch_loss_history, val_loss_batches
 end
 
 """

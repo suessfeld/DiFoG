@@ -87,8 +87,9 @@ function run_automated_pipeline(;
             model.gnn
         )
 
-        @info "Training model for $epochs epochs..."
-        loss_history, val_loss_history = Thesis.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader)
+         @info "Training model for $epochs epochs..."
+        loss_history, val_loss_history, batch_loss_history, val_loss_batches =
+            Thesis.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader)
         final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
         final_val_loss = isempty(val_loss_history) ? NaN : val_loss_history[end]
 
@@ -99,7 +100,7 @@ function run_automated_pipeline(;
         graphs_dir = joinpath(result_root, "graphs")
         mkpath(graphs_dir)
         loss_plot_path = joinpath(graphs_dir, "loss-$run_id.png")
-        Thesis.plot_loss_curve(Float32.(loss_history), Float32.(val_loss_history), loss_plot_path;
+        Thesis.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path;
                                title="Training Loss — $run_id")
         @info "Loss curve saved to $loss_plot_path"
     end
