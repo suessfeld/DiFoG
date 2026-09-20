@@ -100,7 +100,7 @@ function run_automated_pipeline(;
         graphs_dir = joinpath(result_root, "graphs")
         mkpath(graphs_dir)
         loss_plot_path = joinpath(graphs_dir, "loss-$run_id.png")
-        Thesis.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path;
+        Thesis.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path, batch_size;
                                title="Training Loss — $run_id")
         @info "Loss curve saved to $loss_plot_path"
     end
