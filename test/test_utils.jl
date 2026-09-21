@@ -11,7 +11,20 @@ using Base.Iterators: partition
 A helper function that runs a training and test run, then evaluates the models and saves the results.
 
 Parameters:
-    - 'run_id': The id of this run. Defaults to this timestamp. Before training it is checked whether a model with the provided run_id is already saved, which will be loaded.
+    - 'run_id': The id of this run — identifies this run's report, instance dumps, and loss plot
+      (see `train_run_id` for what identifies the model itself). Defaults to a timestamp.
+    - 'train_run_id': The id used ONLY for the trained model file (`models/model-<train_run_id>.jld2`)
+      and its loss curve/history (`graphs/loss-<train_run_id>.{png,txt}`). Defaults to `run_id`, so
+      existing single-run callers are unaffected. Pass a DIFFERENT value than `run_id` to decouple
+      training from evaluation — e.g. a grid search where the trained model only depends on
+      (problem, method), but many evaluation cells (different scheduler/inference_steps) should all
+      load that SAME trained model rather than each training their own copy from scratch. See
+      project notes: scheduler type and inference_steps are read only at inference time
+      (`sample_heatmap`'s iteration over `model.method.scheduler`) — `corrupt_batch` and
+      `compute_loss_and_gradients` only ever read `.total_steps`, so two schedulers differing only
+      in type/`inference_steps` are training-equivalent, and training them separately wastes compute
+      and adds unseeded-RNG noise the grid script's own `Random.seed!`/`CUDA.seed!` calls can't
+      correct for once several cells have run.
     - 'model': The model that should be trained and tested.
     - 'generator': The used graph generator.
     - 'solver': The solver that solves the problem.
@@ -29,6 +42,7 @@ Parameters:
 """
 function run_automated_pipeline(;
     run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),
+    train_run_id::String = run_id,
     model::DiffusionModel,
     generator::GraphGenerator,
     solver::ProblemSolver,
@@ -46,12 +60,12 @@ function run_automated_pipeline(;
     test_seed::Int,
     validation_seed::Int
 )
-    @info "=== Starting Pipeline Run: $run_id ==="
+    @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id) ==="
     seeds_dir = joinpath(result_root, "seeds")
 
     models_dir = joinpath(result_root, "models")
     mkpath(models_dir)
-    model_path = joinpath(models_dir, "model-$run_id.jld2")
+    model_path = joinpath(models_dir, "model-$train_run_id.jld2")
 
     model_already_exists = isfile(model_path)
 
@@ -60,10 +74,10 @@ function run_automated_pipeline(;
     val_loader = nothing
 
     if model_already_exists
-        @info "Found existing model for run_id '$run_id' at $model_path — loading weights and skipping training."
+        @info "Found existing model for train_run_id '$train_run_id' at $model_path — loading weights and skipping training."
         Thesis.load_model!(model, model_path)
     else
-        @info "No existing model found for run_id '$run_id' — training from scratch."
+        @info "No existing model found for train_run_id '$train_run_id' — training from scratch."
 
         val_loader = nothing
         if num_val > 0
@@ -99,9 +113,9 @@ function run_automated_pipeline(;
 
         graphs_dir = joinpath(result_root, "graphs")
         mkpath(graphs_dir)
-        loss_plot_path = joinpath(graphs_dir, "loss-$run_id.png")
+        loss_plot_path = joinpath(graphs_dir, "loss-$train_run_id.png")
         Thesis.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path, batch_size;
-                               title="Training Loss — $run_id")
+                               title="Training Loss — $train_run_id")
         @info "Loss curve saved to $loss_plot_path"
     end
 
@@ -336,6 +350,7 @@ function run_automated_pipeline(;
 
         println(io, "\\subsubsection{Training Hyperparameters}")
         write_latex_kv_table(io, [
+            ("Trained Model", train_run_id),
             ("Loaded pretrained model", string(model_already_exists)),
             ("Epochs", string(epochs)),
             ("Batch Size", string(batch_size)),
