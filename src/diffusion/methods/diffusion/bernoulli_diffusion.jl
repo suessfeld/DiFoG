@@ -34,7 +34,6 @@ Parameters:
     - 'T': The total number of forward steps.
 """
 get_alphas(T::Int) = cumprod(1.0f0 .- 2.0f0 .* get_betas(T))
-get_alphas(T::Int) = cumprod(1.0f0 .- 2.0f0 .* get_betas(T))
 
 """
     BernoulliDiffusion{S<:TimeSchedule{Int}} <: Diffusion
