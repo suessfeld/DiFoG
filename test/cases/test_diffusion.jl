@@ -1,14 +1,14 @@
 using TestItems
-using Thesis
+using DiFoG
 
 @testmodule TestDiffusion begin
     using Test
-    using Thesis
+    using DiFoG
     using GraphNeuralNetworks
     using Flux
 
     # Reference β schedule (DIFUSCO linear 1e-4 → 2e-2 for T = 1000, endpoints scaled by 1000/T),
-    # written out independently of Thesis.get_betas on purpose.
+    # written out independently of DiFoG.get_betas on purpose.
     reference_alphas(T) = cumprod(1.0f0 .- 2.0f0 .* Float32.(range(1f-4 * 1000f0 / T, 2f-2 * 1000f0 / T, length=T)))
     export reference_alphas
 end
@@ -29,7 +29,7 @@ end
     t_val = 50
     t = fill(Int32(t_val), N) |> Flux.gpu
 
-    q_sampled = Thesis.q(diffusion, x_0, t) |> Flux.cpu
+    q_sampled = DiFoG.q(diffusion, x_0, t) |> Flux.cpu
 
     ᾱₜ = reference_alphas(total_steps)[t_val]
     expected_prob_keep = 0.5f0 * (1.0f0 + ᾱₜ)
@@ -47,12 +47,12 @@ end
 
 @testitem "Test BernoulliDiffusion β schedule (T=1000 unchanged, x_T uniform for other T)" setup=[TestDiffusion] begin
     # T = 1000: exactly DIFUSCO's linear 1e-4 → 2e-2
-    @test Thesis.get_betas(1000) ≈ Float32.(range(1f-4, 2f-2, length=1000))
+    @test DiFoG.get_betas(1000) ≈ Float32.(range(1f-4, 2f-2, length=1000))
     # q(x_T | x_0) ≈ Uniform for different T thanks to the 1000/T scaling
     for T in (100, 500, 1000)
-        @test Thesis.get_alphas(T)[end] < 1f-6
+        @test DiFoG.get_alphas(T)[end] < 1f-6
     end
-    @test_throws AssertionError Thesis.get_betas(40)
+    @test_throws AssertionError DiFoG.get_betas(40)
 end
 
 @testitem "Test BernoulliDiffusion Posterior Probability exact values" setup=[TestDiffusion] begin
@@ -69,7 +69,7 @@ end
     t_idx = 50
     s_idx = 40
 
-    p_post = Thesis.posterior_prob(diffusion, x_t, x_0_pred, t_idx, s_idx) |> Flux.cpu
+    p_post = DiFoG.posterior_prob(diffusion, x_t, x_0_pred, t_idx, s_idx) |> Flux.cpu
 
     αs = reference_alphas(total_steps)
     α_bar_t = αs[t_idx]
@@ -110,7 +110,7 @@ end
     diffusion = BernoulliDiffusion(LinearScheduler(Int, 100, 10))
     x_t = Float32[1.0 0.0 1.0 0.0]
     x_0_pred = Float32[0.1 0.9 0.5 0.3]
-    @test Thesis.posterior_prob(diffusion, x_t, x_0_pred, 37, 37) ≈ x_t atol=1e-6
+    @test DiFoG.posterior_prob(diffusion, x_t, x_0_pred, 37, 37) ≈ x_t atol=1e-6
 end
 
 @testitem "Test BernoulliDiffusion Posterior Probability boundary case s=0" setup=[TestDiffusion] begin
@@ -126,7 +126,7 @@ end
     t_idx = 10
     s_idx = 0
 
-    p_post = Thesis.posterior_prob(diffusion, x_t, x_0_pred, t_idx, s_idx) |> Flux.cpu
+    p_post = DiFoG.posterior_prob(diffusion, x_t, x_0_pred, t_idx, s_idx) |> Flux.cpu
 
     @info p_post
     @test size(p_post) == size(x_t |> Flux.cpu)

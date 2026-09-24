@@ -265,7 +265,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
 
     for epoch in 1:epochs
         if epoch > 1 && data_loader.data isa RuntimeDataset
-            Thesis.reset!(data_loader.data)
+            DiFoG.reset!(data_loader.data)
         end
 
         epoch_loss = 0.0f0
@@ -393,6 +393,6 @@ Parameters:
 function infer(model::DiffusionModel, batch::GNNGraph)
     g_gpu = batch |> Flux.gpu
     shape = (model.gnn.config.in_dim, g_gpu.num_nodes)   # M7
-    heatmap_gpu = Thesis.sample_heatmap(model.method, model, shape, g_gpu)
+    heatmap_gpu = DiFoG.sample_heatmap(model.method, model, shape, g_gpu)
     return heatmap_gpu |> Flux.cpu
 end

@@ -1,9 +1,9 @@
 using TestItems
-using Thesis
+using DiFoG
 
 @testmodule TestDataUtils begin
     using Test
-    using Thesis
+    using DiFoG
     using GraphNeuralNetworks
     export GNNGraph, edge_index
 end
@@ -14,7 +14,7 @@ end
     t = [2, 3, 1]
     g = GNNGraph(s, t; num_nodes=3, ndata=(; x=rand(Float32, 1, 3)))
 
-    g_norm = Thesis.normalize_graph(g)
+    g_norm = DiFoG.normalize_graph(g)
 
     src_norm, dst_norm = edge_index(g_norm)
     @test eltype(src_norm) == Int32
@@ -28,7 +28,7 @@ end
     x0 = rand(Float32, 1, 4)
     g = GNNGraph(s, t; num_nodes=4, ndata=(; x=x0))
 
-    g_norm = Thesis.normalize_graph(g)
+    g_norm = DiFoG.normalize_graph(g)
 
     @test g_norm.num_nodes == g.num_nodes
     @test g_norm.num_edges == g.num_edges
@@ -46,7 +46,7 @@ end
     x0 = Float32[0.1 0.9]
     g = GNNGraph(s, t; num_nodes=2, ndata=(; x=x0))
 
-    g_norm = Thesis.normalize_graph(g)
+    g_norm = DiFoG.normalize_graph(g)
 
     @test g_norm.ndata.x == g.ndata.x
 end

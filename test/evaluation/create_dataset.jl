@@ -4,9 +4,9 @@ Pkg.activate(joinpath(@__DIR__, "..", ".."))
 using CUDA
 using cuDNN
 using Flux
-using Thesis
+using DiFoG
 
-include(joinpath(pkgdir(Thesis), "test", "test_utils.jl"))
+include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
 
 
 result_root = "/home/e12023149/thesis/results"

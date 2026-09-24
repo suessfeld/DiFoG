@@ -1,9 +1,9 @@
 using TestItems
-using Thesis
+using DiFoG
 
 @testmodule TestDecodingUtils begin
     using Test
-    using Thesis
+    using DiFoG
 end
 
 @testitem "Test hamming_distance basic cases" setup=[TestDecodingUtils] begin
@@ -89,13 +89,13 @@ end
     g = GNNGraph(s, t; num_nodes=4)
 
     misp = MISPSolver()
-    mask = Thesis.decode_heatmap(misp, g, degree_baseline_heatmap(misp, g))
-    @test Thesis.evaluate(misp, g, mask) == 2.0
+    mask = DiFoG.decode_heatmap(misp, g, degree_baseline_heatmap(misp, g))
+    @test DiFoG.evaluate(misp, g, mask) == 2.0
 
     maxcut = MaxCutSolver()
     @test label_symmetric(maxcut) && !label_symmetric(misp)
-    mask = Thesis.decode_heatmap(maxcut, g, degree_baseline_heatmap(maxcut, g))
-    @test Thesis.evaluate(maxcut, g, mask) == 4.0
+    mask = DiFoG.decode_heatmap(maxcut, g, degree_baseline_heatmap(maxcut, g))
+    @test DiFoG.evaluate(maxcut, g, mask) == 4.0
 
     r = random_baseline_score(maxcut, g, 20; rng=Random.Xoshiro(1))
     @test 0.0 <= r <= 4.0

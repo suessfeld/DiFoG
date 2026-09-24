@@ -1,4 +1,4 @@
-# Thesis.jl
+# DiFoG.jl — Diffusion & Flow Matching for Graphs
 
 A Julia framework for solving Combinatorial Optimization Problems (COPs) like the Maximum Independent Set (MIS) or Maximum Cut (MaxCut) problem on graphs with **generative diffusion models built on Graph Neural Networks**. It implements the discrete
 Bernoulli diffusion framework proposed by Sun et al. in **DIFUSCO** and the discrete flow matching framework proposed by Li et al. in **EFLOCO**, both driven by an anisotropic GNN denoiser and a family of pluggable timestep schedulers (linear, cosine, Adaptive Time-step Scheduling Strategy (ATSS)).
@@ -56,7 +56,7 @@ heatmap, which is then greedily decoded into a feasible solution via
 ## Module Structure
 ```
 src/
-├── Thesis.jl # module entry point, include order
+├── DiFoG.jl # module entry point, include order
 ├── diffusion_model.jl # DiffusionModel wrapper, training loop, build_model_input
 ├── diffusion/
 │ ├── diffusion.jl # abstract type Diffusion
@@ -114,10 +114,10 @@ Pkg.activate(".")
 using CUDA
 using cuDNN
 using Flux
-using Thesis
+using DiFoG
 
 # Training and pipeline helpers are outside of the package!
-include(joinpath(pkgdir(Thesis), "test", "test_utils.jl"))
+include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
 
 function main()
     # `run_id` is derived from the script's own filename.
@@ -202,13 +202,13 @@ skipped and the saved weights are loaded instead.
 
 It can also be done manually:
 ```julia
-using Thesis, Flux
+using DiFoG, Flux
 
 model = DiffusionModel(AGNN(gnn_config), BernoulliDiffusion(scheduler)) |> Flux.gpu
-Thesis.load_model!(model, "models/model-my_run.jld2")
+DiFoG.load_model!(model, "models/model-my_run.jld2")
 
 g = ... |> Flux.gpu               # a GNNGraph, e.g. from a GraphGenerator
-heatmap = Thesis.infer(model, g)  # runs sample_heatmap and returns it on CPU
+heatmap = DiFoG.infer(model, g)  # runs sample_heatmap and returns it on CPU
 ```
 
 ---
@@ -217,9 +217,9 @@ heatmap = Thesis.infer(model, g)  # runs sample_heatmap and returns it on CPU
 
 Adding a new component follows the same pattern throughout the codebase —
 subtype the relevant abstract type, implement its required functions, then
-register the file in `src/Thesis.jl`:
+register the file in `src/DiFoG.jl`:
 
-- **New diffusion/flow-matching method**: subtype `Diffusion`; implement `corrupt_batch`, `p` (or the method-specific reverse step), `sample_heatmap`, and either `calculate_loss` or a custom `Thesis.compute_loss_and_gradients` overload.
+- **New diffusion/flow-matching method**: subtype `Diffusion`; implement `corrupt_batch`, `p` (or the method-specific reverse step), `sample_heatmap`, and either `calculate_loss` or a custom `DiFoG.compute_loss_and_gradients` overload.
 - **New scheduler**: subtype `Scheduler{T}`; provide a constructor that populates `total_steps`, `inference_steps`, and `steps` — iteration, `length`, and `collect` are inherited from the abstract type. Note that any new Scheduler must also follow the `Iterator` design pattern (ascending by default; use `Iterators.reverse` for descending traversal).
 - **New GNN architecture**: subtype `GNN`; implement `(model::YourGNN)(g::GNNGraph, x_input::AbstractMatrix)` returning per-node logits, matching the `in_dim`/`hidden_dim`/`output_dim` contract of `GNNConfig`.
 - **New problem/solver**: subtype `ProblemSolver`; implement the solver call `(solver::YourSolver)(g::Graphs.SimpleGraph)` returning a `1×n` label matrix, and `decode_heatmap`/`evaluate` methods dispatched on your solver type for problem-specific decoding and scoring.

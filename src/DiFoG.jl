@@ -1,4 +1,4 @@
-module Thesis
+module DiFoG
 
 using CUDA
 using Flux

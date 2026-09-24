@@ -1,9 +1,9 @@
 using TestItems
-using Thesis
+using DiFoG
 
 @testmodule TestGraphGenerators begin
     using Test
-    using Thesis
+    using DiFoG
     using Graphs
     export nv, ne, vertices, edges, is_connected, has_edge
 end

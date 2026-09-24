@@ -5,9 +5,9 @@ using CUDA
 using cuDNN
 using Flux
 using Random
-using Thesis
+using DiFoG
 
-include(joinpath(pkgdir(Thesis), "test", "test_utils.jl"))
+include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
 
 """
     build_run_id(problem_name, method_name, generator, gnn_config, scheduler_name, inference_steps)

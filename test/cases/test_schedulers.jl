@@ -1,9 +1,9 @@
 using TestItems
-using Thesis
+using DiFoG
 
 @testmodule TestSchedulers begin
     using Test
-    using Thesis
+    using DiFoG
 end
 
 @testitem "Test Discrete Cosine Scheduler" setup=[TestSchedulers] begin
@@ -217,7 +217,7 @@ end
     κ(t) = t
 
     # λ = log(0.5 / 0.5) = 0 ⇒ t = 0.5
-    t_recovered = Thesis._lambda_inverse(κ, 0.0f0, tol=1f-5)
+    t_recovered = DiFoG._lambda_inverse(κ, 0.0f0, tol=1f-5)
 
     @test t_recovered ≈ 0.5f0 atol=1f-4
 end
@@ -245,7 +245,7 @@ end
 end
 
 @testitem "Test ATSS Int conversion maps progress to diffusion time (C3)" setup=[TestSchedulers] begin
-    s_float = Thesis.ATSSScheduler{Float32}(100, 3, Float32[0, 0.1, 0.95, 1], t -> t, t -> 1f0, 0.5f0)
+    s_float = DiFoG.ATSSScheduler{Float32}(100, 3, Float32[0, 0.1, 0.95, 1], t -> t, t -> 1f0, 0.5f0)
     s_int = convert(TimeSchedule{Int}, s_float)
     @test s_int.steps == [0, 5, 90, 100]              # t = T(1 − τ), sorted ascending
     back = convert(TimeSchedule{Float32}, s_int)

@@ -28,7 +28,7 @@ Seeds the global CPU RNG and (if functional) the CUDA RNG from `stable_seed(key)
 function seed_everything!(key::AbstractString)
     seed = stable_seed(key)
     Random.seed!(seed)
-    Thesis.CUDA.functional() && Thesis.CUDA.seed!(seed)
+    DiFoG.CUDA.functional() && DiFoG.CUDA.seed!(seed)
     return seed
 end
 
@@ -133,7 +133,7 @@ function run_automated_pipeline(;
 )
     @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
     seeds_dir = joinpath(result_root, "seeds")
-    symmetric = Thesis.label_symmetric(solver)
+    symmetric = DiFoG.label_symmetric(solver)
 
     models_dir = joinpath(result_root, "models")
     mkpath(models_dir)
@@ -147,7 +147,7 @@ function run_automated_pipeline(;
 
     if model_already_exists
         @info "Found existing model for train_run_id '$train_run_id' at $model_path — loading weights and skipping training."
-        Thesis.load_model!(model, model_path)
+        DiFoG.load_model!(model, model_path)
     else
         @info "No existing model found for train_run_id '$train_run_id' — training from scratch."
 
@@ -179,19 +179,19 @@ function run_automated_pipeline(;
 
         @info "Training model for $epochs epochs (symmetric labels: $symmetric)..."
         loss_history, val_loss_history, batch_loss_history, val_loss_batches =
-            Thesis.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader,
+            DiFoG.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader,
                                           symmetric_labels=symmetric)
         final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
         final_val_loss = isempty(val_loss_history) ? NaN : val_loss_history[end]
 
         @info "Saving trained model weights immediately after training completes..."
-        Thesis.save_model(model, model_path)
+        DiFoG.save_model(model, model_path)
         @info "Model successfully saved to $model_path"
 
         graphs_dir = joinpath(result_root, "graphs")
         mkpath(graphs_dir)
         loss_plot_path = joinpath(graphs_dir, "loss-$train_run_id.png")
-        Thesis.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path, batch_size;
+        DiFoG.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path, batch_size;
                                title="Training Loss — $train_run_id")
         @info "Loss curve saved to $loss_plot_path"
     end
@@ -252,8 +252,8 @@ function run_automated_pipeline(;
         batch_size_actual = length(graphs)
 
         batch_inference_time = @elapsed begin
-            preds_probs = Thesis.sample_heatmap(model.method, model, shape, g_batch_gpu)
-            Thesis._sync_device()
+            preds_probs = DiFoG.sample_heatmap(model.method, model, shape, g_batch_gpu)
+            DiFoG._sync_device()
         end
         total_inference_time += batch_inference_time
         avg_time_per_instance = batch_inference_time / batch_size_actual
@@ -277,35 +277,35 @@ function run_automated_pipeline(;
             heatmap_slice = preds_probs_cpu[1, start_slice:end_slice]
             heatmap_vec = vec(heatmap_slice)
             true_vec = vec(true_mask_cpu[1, start_slice:end_slice])
-            mask_slice = Thesis.decode_heatmap(solver, graphs[j], heatmap_vec)
+            mask_slice = DiFoG.decode_heatmap(solver, graphs[j], heatmap_vec)
             push!(valid_masks_cpu, mask_slice)
 
             s_j, t_j = edge_index(graphs[j])
             push!(edge_data, (copy(s_j), copy(t_j)))
             push!(node_masks, Int.(vec(graphs[j].ndata.x)))
 
-            model_score_j = Thesis.evaluate(solver, graphs[j], mask_slice)
-            true_score_j  = Thesis.evaluate(solver, graphs[j], true_vec)
+            model_score_j = DiFoG.evaluate(solver, graphs[j], mask_slice)
+            true_score_j  = DiFoG.evaluate(solver, graphs[j], true_vec)
             batch_model_score += model_score_j
             batch_true_score  += true_score_j
             push!(per_instance_model_scores, model_score_j)
             push!(per_instance_true_scores, true_score_j)
 
             # Q16: controls through the same decoder
-            random_score_j = Thesis.random_baseline_score(solver, graphs[j], num_random_baseline; rng=baseline_rng)
-            degree_mask = Thesis.decode_heatmap(solver, graphs[j], Thesis.degree_baseline_heatmap(solver, graphs[j]))
-            degree_score_j = Thesis.evaluate(solver, graphs[j], degree_mask)
+            random_score_j = DiFoG.random_baseline_score(solver, graphs[j], num_random_baseline; rng=baseline_rng)
+            degree_mask = DiFoG.decode_heatmap(solver, graphs[j], DiFoG.degree_baseline_heatmap(solver, graphs[j]))
+            degree_score_j = DiFoG.evaluate(solver, graphs[j], degree_mask)
             push!(per_instance_random_scores, random_score_j)
             push!(per_instance_degree_scores, degree_score_j)
 
             # R28: quality of the reference solution itself
             push!(instance_gaps, _instance_gap(graphs[j]))
 
-            mean_entropy, confidence = Thesis.heatmap_decisiveness(heatmap_vec)
+            mean_entropy, confidence = DiFoG.heatmap_decisiveness(heatmap_vec)
             total_entropy += mean_entropy
             total_confidence += confidence
 
-            corr_dist = Thesis.correction_distance(heatmap_vec, mask_slice)
+            corr_dist = DiFoG.correction_distance(heatmap_vec, mask_slice)
             total_correction_rate += corr_dist / num_nodes
 
             start_slice = end_slice + 1
@@ -389,9 +389,9 @@ function run_automated_pipeline(;
         repeat_masks = Vector{Vector{Int}}(undef, num_repeat_inference)
 
         for r in 1:num_repeat_inference
-            heatmap_r = Thesis.sample_heatmap(model.method, model, shape, g_repeat_gpu)
+            heatmap_r = DiFoG.sample_heatmap(model.method, model, shape, g_repeat_gpu)
             heatmap_r_cpu = vec(Flux.cpu(heatmap_r))
-            mask_r = Int.(vec(Thesis.decode_heatmap(solver, last_test_graph, heatmap_r_cpu)))
+            mask_r = Int.(vec(DiFoG.decode_heatmap(solver, last_test_graph, heatmap_r_cpu)))
             repeat_masks[r] = mask_r
 
             filepath = joinpath(test_results_dir, "test_instance_$(last_test_instance_idx)_$(r)_result.txt")
@@ -410,7 +410,7 @@ function run_automated_pipeline(;
 
         pairwise_distances = Float64[]
         for i in 1:num_repeat_inference, j in (i+1):num_repeat_inference
-            hd = Thesis.solution_distance(repeat_masks[i], repeat_masks[j]; symmetric=symmetric)   # H5: min(d, n−d) for MaxCut
+            hd = DiFoG.solution_distance(repeat_masks[i], repeat_masks[j]; symmetric=symmetric)   # H5: min(d, n−d) for MaxCut
             push!(pairwise_distances, hd / last_test_graph.num_nodes)
         end
         avg_hamming_stability = isempty(pairwise_distances) ? 0.0 : mean(pairwise_distances)
