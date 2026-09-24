@@ -1,29 +1,46 @@
 # src/diffusion/scheduler.jl
 #
-# Defines the abstract Scheduler type and basic iteration utilities for managing denoising and integration timesteps across different methods.
+# Defines the abstract TimeSchedule type, the shared time convention of all schedules, and basic
+# iteration utilities for managing denoising and integration timesteps across different methods.
 
-export Scheduler
+export TimeSchedule
 
 """
-    Scheduler{T}
+    TimeSchedule{T}
 
-An abstract implementation of a scheduler. Implementations can either be of type Int or Float32 depending on the chosen diffusion method. It implements the iterator pattern, thus a Scheduler is designed to be iterated upon, returning the defined scheduling steps.    
+An abstract base type for schedulers. Implementations use either Int or Float32 step types and support the iterator pattern to yield scheduling steps.
+
+Parameters:
+    - 'T': The data type of the scheduling steps (e.g., Int or Float32).
 """
-abstract type Scheduler{T} end  #GR TODO Name Clash mit MHLib.Scheduler, bitte umbenennen
+abstract type TimeSchedule{T} end
 
-Base.length(s::Scheduler) = max(0, length(s.steps))
-Base.collect(s::Scheduler) = s.steps # use collect to just get the entire step vector
-Base.eltype(::Type{<:Scheduler{T}}) where T = T # Just added for correct typing - does not really have an impact
-
-# Forward Iterator τ_0 → τ_T
-function Base.iterate(s::Scheduler, state::Int=1)
+Base.length(s::TimeSchedule) = length(s.steps)
+Base.collect(s::TimeSchedule) = copy(s.steps)
+Base.eltype(::Type{<:TimeSchedule{T}}) where T = T
+function Base.iterate(s::TimeSchedule, state::Int=1)
     state > length(s.steps) && return nothing
     return (s.steps[state], state + 1)
 end
 
-# Reverse view: τ_T → τ_0
-function Base.iterate(r::Iterators.Reverse{<:Scheduler}, state::Int=length(r.itr.steps))
+# Reverse view
+function Base.iterate(r::Iterators.Reverse{<:TimeSchedule}, state::Int=length(r.itr.steps))
     state < 1 && return nothing
     return (r.itr.steps[state], state - 1)
 end
-Base.length(r::Iterators.Reverse{<:Scheduler}) = length(r.itr.steps)
+Base.length(r::Iterators.Reverse{<:TimeSchedule}) = length(r.itr.steps)
+
+"""
+    _progress_steps(::Type{Int}, progress::AbstractVector{<:Integer}, T::Int)
+    _progress_steps(::Type{Float32}, progress::AbstractVector{<:Integer}, T::Int)
+
+Maps integer progress points to their stored representation (either Float32 progress or Int diffusion times). The resulting steps are sorted in ascending order and deduplicated.
+
+Parameters:
+    - 'Type': The target type for the steps (Int or Float32).
+    - 'progress': A vector of integer progress points.
+    - 'T': The total number of steps in the training process.
+"""
+_progress_steps(::Type{Int}, progress::AbstractVector{<:Integer}, T::Int) = sort!(unique!(T .- collect(progress)))
+_progress_steps(::Type{Float32}, progress::AbstractVector{<:Integer}, T::Int) =
+    Float32.(sort!(unique!(collect(progress)))) ./ Float32(T)

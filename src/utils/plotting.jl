@@ -12,33 +12,24 @@ export plot_loss_curve
                     val_loss_batches::Vector{Int}, filepath::AbstractString, batch_size::Int;
                     title::AbstractString="Training Loss", smoothing_window::Int=25)
 
-Plots per-batch training loss (raw, plus a moving-average smoothed line) and per-epoch validation
-loss, and saves it to `filepath`. Batch-level tracking is used instead of epoch-averaging so fast
-early convergence within an epoch is visible rather than hidden by the epoch average (see project
-notes — an epoch-averaged plot previously looked flat from epoch 1 even though the model had
-actually converged within the first few dozen batches).
-
-The y-axis always starts at 0 and tops out slightly above the highest loss value (10% headroom).
+Plots per-batch training loss with a moving-average overlay and per-epoch validation loss, saving the result to the specified filepath.
 
 Parameters:
     - 'batch_loss_history': Per-batch training loss, one entry per batch, across the whole run.
     - 'val_loss_history': Per-epoch average validation loss, or empty if validation was disabled.
-    - 'val_loss_batches': The batch-number at which each `val_loss_history` entry was computed
-      (validation still runs once per epoch — this places those points at the correct x-position
-      on the shared batch-number axis, not one point per batch).
-    - 'filepath': Output path, including extension.
-    - 'batch_size': The training batch size used for this run — passed through to
-      `save_loss_history` so epoch boundaries can be reconstructed from batch number later.
-    - 'title': Plot title.
-    - 'smoothing_window': Window size (in batches) for the moving-average overlay on the raw
-      training curve. Clamped to the actual history length if shorter.
+    - 'val_loss_batches': The batch-number at which each validation loss entry was computed.
+    - 'filepath': Output path for the plot, including extension.
+    - 'batch_size': The training batch size used for this run.
+    - 'title': The title of the plot.
+    - 'smoothing_window': The window size (in batches) for the moving-average overlay.
 """
 function plot_loss_curve(batch_loss_history::Vector{Float32}, val_loss_history::Vector{Float32},
                          val_loss_batches::Vector{Int}, filepath::AbstractString, batch_size::Int;
                          title::AbstractString="Training Loss", smoothing_window::Int=25)
     batches = 1:length(batch_loss_history)
-    all_losses = isempty(val_loss_history) ? batch_loss_history : vcat(batch_loss_history, val_loss_history)
-    y_max = maximum(all_losses) * 1.1f0
+    all_losses = vcat(batch_loss_history, val_loss_history)
+    finite_losses = filter(isfinite, all_losses)
+    y_max = isempty(finite_losses) ? 1f0 : max(maximum(finite_losses) * 1.1f0, 1f-6)
 
     p = Plots.plot(batches, batch_loss_history;
                     label="Train Loss (raw)", xlabel="Batch", ylabel="Loss",
@@ -64,21 +55,14 @@ end
     save_loss_history(batch_loss_history::Vector{Float32}, val_loss_history::Vector{Float32},
                       val_loss_batches::Vector{Int}, filepath::AbstractString, batch_size::Int)
 
-Writes the raw loss history backing `plot_loss_curve` to a plain-text CSV, saved next to the PNG
-(same path, `.txt` extension) so plots can be regenerated or reworked later — e.g. for the thesis
-evaluation chapter — without rerunning training.
-
-Two sections, since training loss is per-batch but validation loss is only per-epoch (see
-`train_diffusion_model!`): a `batch` table (one row per training batch) and a `validation` table
-(one row per epoch, indexed by the batch number it was measured at via `val_loss_batches`).
-`batch_size` is written as a header comment, not a column — needed to reconstruct epoch boundaries
-from batch number later, since the batch history itself only tracks a running count, not epoch.
+Writes the raw loss history backing the loss curve plot to a plain-text file alongside the generated image.
 
 Parameters:
-    - 'batch_loss_history', 'val_loss_history', 'val_loss_batches': same as `plot_loss_curve`.
-    - 'filepath': the PNG path this history belongs to — the `.txt` is written alongside it (same
-      stem, `.txt` extension), not at this exact path.
-    - 'batch_size': the training batch size used for this run.
+    - 'batch_loss_history': Per-batch training loss across the whole run.
+    - 'val_loss_history': Per-epoch average validation loss.
+    - 'val_loss_batches': The batch-number at which each validation loss entry was computed.
+    - 'filepath': The output path of the corresponding plot (used to determine the text file path).
+    - 'batch_size': The training batch size used for this run.
 """
 function save_loss_history(batch_loss_history::Vector{Float32}, val_loss_history::Vector{Float32},
                            val_loss_batches::Vector{Int}, filepath::AbstractString, batch_size::Int)

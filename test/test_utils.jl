@@ -3,42 +3,113 @@ using GraphNeuralNetworks
 using Printf
 using Dates
 using Statistics
+using Random
 using Base.Iterators: partition
 
 """
-    run_automated_pipeline(;run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),model::DiffusionModel,generator::GraphGenerator,solver::ProblemSolver,num_train::Int = 1000,num_test::Int = 100,num_val::Int = max(20, div(num_train,20)),epochs::Int = 5,batch_size::Int = 16,learning_rate::Float64 = 1e-3,test_time_limit::Float64 = 2.0,num_repeat_inference::Int = 5,ood_generator=nothing,ood_num_test::Int=50
+    stable_seed(s::AbstractString)
 
-A helper function that runs a training and test run, then evaluates the models and saves the results.
+Deterministic 32-bit FNV-1a hash of `s`, used as RNG seed (R31). Unlike `hash`, it does not depend on
+the Julia version, so seeds derived from run ids are reproducible across sessions and machines.
+"""
+function stable_seed(s::AbstractString)
+    h = UInt32(2166136261)
+    for b in codeunits(s)
+        h = (h ⊻ UInt32(b)) * UInt32(16777619)
+    end
+    return Int(h)
+end
+
+"""
+    seed_everything!(key::AbstractString)
+
+Seeds the global CPU RNG and (if functional) the CUDA RNG from `stable_seed(key)`.
+"""
+function seed_everything!(key::AbstractString)
+    seed = stable_seed(key)
+    Random.seed!(seed)
+    Thesis.CUDA.functional() && Thesis.CUDA.seed!(seed)
+    return seed
+end
+
+_finite(v) = filter(isfinite, v)
+_mean_or_nan(v) = isempty(v) ? NaN : mean(v)
+_fmt(x; digits=4) = isnan(x) ? "N/A" : string(round(x, digits=digits))
+
+"""
+    _instance_gap(g::GNNGraph)
+
+Relative gap of the reference solution of `g` as stored by `RuntimeDataset` (`gdata.gap`), NaN if absent.
+"""
+_instance_gap(g::GNNGraph) = :gap in keys(g.gdata) ? Float64(g.gdata.gap[1]) : NaN
+
+"""
+    _ratio_stats(model_scores, ref_scores)
+
+Per-instance ratios 100·model/reference (instances with reference 0 are skipped) → `(mean, std, ci95)`.
+The headline number and its CI are computed from the SAME quantity (H5).
+"""
+function _ratio_stats(model_scores::AbstractVector, ref_scores::AbstractVector)
+    r = [100 * m / t for (m, t) in zip(model_scores, ref_scores) if t > 0]
+    μ = _mean_or_nan(r)
+    σ = length(r) > 1 ? std(r) : NaN
+    return μ, σ, length(r) > 1 ? 1.96 * σ / sqrt(length(r)) : NaN
+end
+
+"""
+    _method_label(method)
+
+Descriptive method name for reports (M5): the flow-matching variant implemented here is DFM with the
+reference-form consistency loss, not the full EFLOCO method (no ρ(t) training density).
+"""
+_method_label(m::BernoulliDiffusion) = "Bernoulli diffusion (DIFUSCO)"
+_method_label(m::DiscreteFlowMatching) =
+    "DFM + consistency (reference form, lambda_cons=$(m.λ_cons)), sampler=$(m.sampler)"
+
+"""
+    _model_eval_signal(method)
+
+Signal level at every time the network is evaluated during sampling (H2), in evaluation order:
+ᾱ_t for Bernoulli diffusion (probability of keeping x_0 is (1+ᾱ)/2; ᾱ ≈ 0 means pure noise),
+κ_τ (fraction committed to the target) for flow matching.
+"""
+function _model_eval_signal(m::BernoulliDiffusion)
+    ts = reverse(m.scheduler.steps)[1:end-1]            # T → … → smallest non-zero step
+    return join(["t=$(t): $(round(m.ᾱ[t], sigdigits=2))" for t in ts], ", ")
+end
+# For :euler this is the NOMINAL κ(τ) of the training path; the Euler sampler under-commits (H1), so the
+# state the model actually receives is less committed (at τ = 0 nothing is committed).
+function _model_eval_signal(m::DiscreteFlowMatching)
+    τs = m.scheduler.steps[1:end-1]                     # 0 → … → last step before 1
+    return join(["tau=$(round(τ, digits=3)): $(round(Float64(m.κ(τ)), sigdigits=2))" for τ in τs], ", ")
+end
+
+"""
+    run_automated_pipeline(; run_id, train_run_id=run_id, model, generator, solver, num_train=1000,
+                           num_test=100, num_val=max(20, div(num_train, 20)), epochs=5, batch_size=16,
+                           learning_rate=1e-3, num_repeat_inference=5, num_random_baseline=10,
+                           evaluate=true, result_root, training_seed, test_seed, validation_seed)
+
+Runs training (or loads an existing model) and, unless `evaluate=false`, a full evaluation that is
+written as a LaTeX report.
 
 Parameters:
-    - 'run_id': The id of this run — identifies this run's report, instance dumps, and loss plot
-      (see `train_run_id` for what identifies the model itself). Defaults to a timestamp.
-    - 'train_run_id': The id used ONLY for the trained model file (`models/model-<train_run_id>.jld2`)
-      and its loss curve/history (`graphs/loss-<train_run_id>.{png,txt}`). Defaults to `run_id`, so
-      existing single-run callers are unaffected. Pass a DIFFERENT value than `run_id` to decouple
-      training from evaluation — e.g. a grid search where the trained model only depends on
-      (problem, method), but many evaluation cells (different scheduler/inference_steps) should all
-      load that SAME trained model rather than each training their own copy from scratch. See
-      project notes: scheduler type and inference_steps are read only at inference time
-      (`sample_heatmap`'s iteration over `model.method.scheduler`) — `corrupt_batch` and
-      `compute_loss_and_gradients` only ever read `.total_steps`, so two schedulers differing only
-      in type/`inference_steps` are training-equivalent, and training them separately wastes compute
-      and adds unseeded-RNG noise the grid script's own `Random.seed!`/`CUDA.seed!` calls can't
-      correct for once several cells have run.
+    - 'run_id': identifies this run's report, instance dumps (defaults to a timestamp).
+    - 'train_run_id': identifies the trained model file (`models/model-<train_run_id>.jld2`) and its loss
+      curve. Defaults to `run_id`; pass a different value to share one trained model across many
+      evaluation cells (scheduler type and `inference_steps` are only used at inference).
     - 'model': The model that should be trained and tested.
-    - 'generator': The used graph generator.
-    - 'solver': The solver that solves the problem.
-    - 'num_train': The number of training instances.
-    - 'num_test': The number of testing instances.
-    - 'num_val': The number of held-out validation instances, materialized once (fixed across epochs) before training starts and used to report per-epoch validation loss. Set to 0 to disable validation entirely (B7).
-    - 'epochs': The amount of epochs that will be trained for.
-    - 'batch_size': The batch size that will be used during training and testing.
-    - 'learning_rate': The learning rate used for the training
-    - 'num_repeat_inference': The amount of inferences that will be done on the last instance. This is to analye the behavior of inferencing on the same instance multiple times.
-    - 'ood_generator': Optional second `GraphGenerator` (e.g. configured for larger/different graphs) used to run a supplementary out-of-distribution evaluation pass after the main in-distribution test (B7). `nothing` (default) skips this entirely.
-    - 'ood_num_test': Number of instances drawn from `ood_generator` for the supplementary pass, if given.
-    - 'result_root': Root directory for models/logs/seeds/reports/instances.
-    - 'training_seed', 'test_seed', 'validation_seed': RNG seeds identifying each split's `<seed>.csv` under `result_root/seeds`.
+    - 'generator': The graph generator.
+    - 'solver': The problem solver (labels, decoder, objective, baselines).
+    - 'num_train', 'num_test', 'num_val': dataset sizes (`num_val = 0` disables validation).
+    - 'epochs', 'batch_size', 'learning_rate': training hyperparameters.
+    - 'num_repeat_inference': repeated inferences on the last test instance (stability measurement).
+    - 'num_random_baseline': random heatmaps per test instance for the random baseline (Q16).
+    - 'evaluate': `false` → only train/load and save the model, no test evaluation or report (R32).
+    - 'result_root': Root directory for models/graphs/seeds/reports/instances.
+    - 'training_seed', 'test_seed', 'validation_seed': seeds identifying each split's `<seed>.csv`.
+
+Returns the report path, or `nothing` when `evaluate=false`.
 """
 function run_automated_pipeline(;
     run_id::String = Dates.format(Dates.now(), "yyyymmdd-HHMMSS"),
@@ -53,15 +124,16 @@ function run_automated_pipeline(;
     batch_size::Int = 16,
     learning_rate::Float64 = 1e-3,
     num_repeat_inference::Int = 5,
-    ood_generator::Union{Nothing, GraphGenerator} = nothing,
-    ood_num_test::Int = 50,
+    num_random_baseline::Int = 10,
+    evaluate::Bool = true,
     result_root::String,
     training_seed::Int,
     test_seed::Int,
     validation_seed::Int
 )
-    @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id) ==="
+    @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
     seeds_dir = joinpath(result_root, "seeds")
+    symmetric = Thesis.label_symmetric(solver)
 
     models_dir = joinpath(result_root, "models")
     mkpath(models_dir)
@@ -79,6 +151,10 @@ function run_automated_pipeline(;
     else
         @info "No existing model found for train_run_id '$train_run_id' — training from scratch."
 
+        # R31: training randomness (t sampling, corruption noise) depends only on train_run_id,
+        # not on how many cells ran before in the same session.
+        seed_everything!("train:" * train_run_id)
+
         val_loader = nothing
         if num_val > 0
             @info "Building fixed validation set ($(num_val) instances, held constant across epochs)..."
@@ -95,19 +171,20 @@ function run_automated_pipeline(;
 
         optim = Flux.setup(
             Flux.Optimisers.OptimiserChain(
-                Flux.Optimisers.ClipGrad(1.0f0),
+                Flux.Optimisers.ClipNorm(1.0f0),   # M2: norm clipping (ClipGrad clips each element), per array
                 Flux.Adam(learning_rate)
             ),
             model.gnn
         )
 
-         @info "Training model for $epochs epochs..."
+        @info "Training model for $epochs epochs (symmetric labels: $symmetric)..."
         loss_history, val_loss_history, batch_loss_history, val_loss_batches =
-            Thesis.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader)
+            Thesis.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader,
+                                          symmetric_labels=symmetric)
         final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
         final_val_loss = isempty(val_loss_history) ? NaN : val_loss_history[end]
 
-        @info "Saving trained model weights immediately after training completes (before test/eval, so a later crash can't discard a completed training run)..."
+        @info "Saving trained model weights immediately after training completes..."
         Thesis.save_model(model, model_path)
         @info "Model successfully saved to $model_path"
 
@@ -118,6 +195,15 @@ function run_automated_pipeline(;
                                title="Training Loss — $train_run_id")
         @info "Loss curve saved to $loss_plot_path"
     end
+
+    if !evaluate
+        @info "evaluate=false — skipping test evaluation for $run_id."
+        return nothing
+    end
+
+    # Evaluation randomness (sampler noise) depends only on run_id.
+    seed_everything!("eval:" * run_id)
+    baseline_rng = Random.Xoshiro(test_seed)
 
     num_params = sum(length, Flux.trainables(model.gnn))
 
@@ -137,6 +223,9 @@ function run_automated_pipeline(;
 
     per_instance_model_scores = Float64[]
     per_instance_true_scores = Float64[]
+    per_instance_random_scores = Float64[]
+    per_instance_degree_scores = Float64[]
+    instance_gaps = Float64[]
 
     last_test_graph = nothing
     last_test_instance_idx = 0
@@ -144,7 +233,7 @@ function run_automated_pipeline(;
     test_results_dir = joinpath(result_root, "instances", "test_instances_$run_id")
     mkpath(test_results_dir)
 
-        Flux.testmode!(model.gnn)
+    Flux.testmode!(model.gnn)
 
     global_test_idx = 1
     batch_num = 0
@@ -164,7 +253,7 @@ function run_automated_pipeline(;
 
         batch_inference_time = @elapsed begin
             preds_probs = Thesis.sample_heatmap(model.method, model, shape, g_batch_gpu)
-            CUDA.synchronize()
+            Thesis._sync_device()
         end
         total_inference_time += batch_inference_time
         avg_time_per_instance = batch_inference_time / batch_size_actual
@@ -187,6 +276,7 @@ function run_automated_pipeline(;
 
             heatmap_slice = preds_probs_cpu[1, start_slice:end_slice]
             heatmap_vec = vec(heatmap_slice)
+            true_vec = vec(true_mask_cpu[1, start_slice:end_slice])
             mask_slice = Thesis.decode_heatmap(solver, graphs[j], heatmap_vec)
             push!(valid_masks_cpu, mask_slice)
 
@@ -195,11 +285,21 @@ function run_automated_pipeline(;
             push!(node_masks, Int.(vec(graphs[j].ndata.x)))
 
             model_score_j = Thesis.evaluate(solver, graphs[j], mask_slice)
-            true_score_j  = Thesis.evaluate(solver, graphs[j], vec(true_mask_cpu[1, start_slice:end_slice]))
+            true_score_j  = Thesis.evaluate(solver, graphs[j], true_vec)
             batch_model_score += model_score_j
             batch_true_score  += true_score_j
             push!(per_instance_model_scores, model_score_j)
             push!(per_instance_true_scores, true_score_j)
+
+            # Q16: controls through the same decoder
+            random_score_j = Thesis.random_baseline_score(solver, graphs[j], num_random_baseline; rng=baseline_rng)
+            degree_mask = Thesis.decode_heatmap(solver, graphs[j], Thesis.degree_baseline_heatmap(solver, graphs[j]))
+            degree_score_j = Thesis.evaluate(solver, graphs[j], degree_mask)
+            push!(per_instance_random_scores, random_score_j)
+            push!(per_instance_degree_scores, degree_score_j)
+
+            # R28: quality of the reference solution itself
+            push!(instance_gaps, _instance_gap(graphs[j]))
 
             mean_entropy, confidence = Thesis.heatmap_decisiveness(heatmap_vec)
             total_entropy += mean_entropy
@@ -218,10 +318,8 @@ function run_automated_pipeline(;
         last_test_graph = graphs[end]
         last_test_instance_idx = global_test_idx - 1
 
-        # File writing runs synchronously (not Threads.@spawn'd) — see ways-of-working notes:
-        # GraphNeuralNetworks.jl's internal edge storage was confirmed, via instrumented logging,
-        # to mutate under concurrent access even behind defensively-copied arrays. Removing the
-        # concurrency here was the actual fix, not a workaround — see conversation history.
+        # File writing runs synchronously (not Threads.@spawn'd): GraphNeuralNetworks.jl's edge storage
+        # was confirmed to mutate under concurrent access.
         start_idx = 1
         for j in 1:length(graphs)
             num_nodes = graphs[j].num_nodes
@@ -253,31 +351,36 @@ function run_automated_pipeline(;
     # generic evaluation parameters
     avg_model_score = total_model_score / total_graphs
     avg_true_score = total_true_score / total_graphs
-    performance_pct = (avg_model_score / avg_true_score) * 100
+    ratio_of_means_pct = (avg_model_score / avg_true_score) * 100          # secondary: ratio of averages
+    # H5: headline = mean of per-instance ratios, with std and CI of the same quantity
+    performance_pct, approx_ratio_std, approx_ratio_ci95 = _ratio_stats(per_instance_model_scores, per_instance_true_scores)
+    random_pct, _, random_ci95 = _ratio_stats(per_instance_random_scores, per_instance_true_scores)
+    degree_pct, _, degree_ci95 = _ratio_stats(per_instance_degree_scores, per_instance_true_scores)
     avg_inference_time_per_instance = total_inference_time / total_graphs
 
     avg_confidence = total_confidence / total_graphs
     avg_entropy = total_entropy / total_graphs
     avg_correction_rate = total_correction_rate / total_graphs
+    corr_rate_str = solver isa MaxCutSolver ? "N/A (threshold decoder)" : string(round(avg_correction_rate, digits=4))
 
-    score_ratios = Float64[]
-    for (m, t) in zip(per_instance_model_scores, per_instance_true_scores)
-        if t > 0
-            push!(score_ratios, m / t * 100)
-        end
-    end
-    approx_ratio_std = length(score_ratios) > 1 ? std(score_ratios) : NaN
-    approx_ratio_ci95 = length(score_ratios) > 1 ? 1.96 * approx_ratio_std / sqrt(length(score_ratios)) : NaN
+    finite_gaps = _finite(instance_gaps)
+    n_gap_missing = length(instance_gaps) - length(finite_gaps)
+    # Gurobi's default MIPGap: OPTIMAL status at relative gap ≤ 1e-4
+    frac_proven_optimal = isempty(finite_gaps) ? NaN : count(<=(1e-4), finite_gaps) / length(finite_gaps)
+    mean_gap = _mean_or_nan(finite_gaps)
+    max_gap = isempty(finite_gaps) ? NaN : maximum(finite_gaps)
 
-    @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Optimal Score: $(round(avg_true_score, digits=2)) | Performance: $(round(performance_pct, digits=2))% ± $(round(approx_ratio_ci95, digits=2))% (95% CI, std=$(round(approx_ratio_std, digits=2))%) | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
+
+    @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Reference Score: $(round(avg_true_score, digits=2)) | Mean per-instance ratio vs. reference: $(round(performance_pct, digits=2))% ± $(round(approx_ratio_ci95, digits=2))% (95% CI) | Random baseline: $(round(random_pct, digits=2))% | Degree baseline: $(round(degree_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
     @info "Heatmap Quality | Avg Decisiveness: $(round(avg_confidence, digits=4)) (H̄=$(round(avg_entropy, digits=4))) | Avg Greedy Correction Rate: $(round(avg_correction_rate, digits=4))"
+    @info "Reference solutions | optimal within MIPGap 1e-4: $(_fmt(frac_proven_optimal)) | mean gap: $(_fmt(mean_gap; digits=6)) | max gap: $(_fmt(max_gap; digits=6)) | without solver result: $n_gap_missing"
 
     avg_hamming_stability = NaN
     if num_repeat_inference > 1 && !isnothing(last_test_graph)
         @info "Running $(num_repeat_inference) repeated inferences on instance $(last_test_instance_idx) for stability measurement..."
 
         g_repeat_gpu = last_test_graph |> Flux.gpu
-        shape = (1, g_repeat_gpu.num_nodes)
+        shape = (model.gnn.config.in_dim, g_repeat_gpu.num_nodes)   # M7
 
         s, t = edge_index(last_test_graph)
         num_edges = div(length(s), 2)
@@ -307,7 +410,7 @@ function run_automated_pipeline(;
 
         pairwise_distances = Float64[]
         for i in 1:num_repeat_inference, j in (i+1):num_repeat_inference
-            hd = Thesis.hamming_distance(repeat_masks[i], repeat_masks[j])
+            hd = Thesis.solution_distance(repeat_masks[i], repeat_masks[j]; symmetric=symmetric)   # H5: min(d, n−d) for MaxCut
             push!(pairwise_distances, hd / last_test_graph.num_nodes)
         end
         avg_hamming_stability = isempty(pairwise_distances) ? 0.0 : mean(pairwise_distances)
@@ -336,16 +439,25 @@ function run_automated_pipeline(;
             ("Problem Solver", "$(typeof(solver)) $(solver)"),
             ("Training Instances", string(num_train)),
             ("Testing Instances", string(num_test)),
+            ("Reference Solutions Optimal within MIPGap 1e-4 (fraction)", _fmt(frac_proven_optimal)),
+            ("Reference Solution Mean Gap", _fmt(mean_gap; digits=6)),
+            ("Reference Solution Max Gap", _fmt(max_gap; digits=6)),
+            ("Instances Without Solver Result", string(n_gap_missing)),
         ]; caption="Data configuration for run $(run_id)", label="tab:data-$(label_base)")
 
         println(io, "\\subsubsection{Model Configuration}")
         write_latex_kv_table(io, [
-            ("Method", string(typeof(model.method))),
+            ("Method", _method_label(model.method)),
             ("GNN Layers", string(model.gnn.config.num_layers)),
             ("GNN Hidden Dim", string(model.gnn.config.hidden_dim)),
+            ("Time Embedding Dim", string(model.gnn.config.time_dim)),
             ("Total Parameters", string(num_params)),
             ("Timesteps (T)", string(model.method.scheduler.total_steps)),
+            ("Inference Schedule", string(typeof(model.method.scheduler).name.name)),
             ("Inference Steps", string(model.method.scheduler.inference_steps)),
+            ("Configured / effective transitions", "$(model.method.scheduler.inference_steps) / $(length(model.method.scheduler.steps) - 1)"),
+            (model.method isa DiscreteFlowMatching ? "Nominal kappa at model evaluations" : "alpha-bar at model evaluations",
+             _model_eval_signal(model.method)),
         ]; caption="Model configuration for run $(run_id)", label="tab:model-$(label_base)")
 
         println(io, "\\subsubsection{Training Hyperparameters}")
@@ -356,40 +468,39 @@ function run_automated_pipeline(;
             ("Batch Size", string(batch_size)),
             ("Learning Rate", string(learning_rate)),
             ("Validation Instances", string(num_val)),
+            ("Flip-invariant Loss", string(symmetric)),
         ]; caption="Training hyperparameters for run $(run_id)", label="tab:hyperparams-$(label_base)")
 
         println(io, "\\subsubsection{Results \\& Metrics}")
+        # keys use a plain "%": latex_escape turns it into "\\%" (pre-escaped keys would be double-escaped)
         results_rows = [
             ("Final Training Loss", model_already_exists ? "N/A (loaded)" : string(round(final_train_loss, digits=6))),
             ("Final Validation Loss", model_already_exists ? "N/A (loaded)" : (isnan(final_val_loss) ? "N/A (num_val=0)" : string(round(final_val_loss, digits=6)))),
-            ("Avg Optimal Solution Size", string(round(avg_true_score, digits=2))),
-            ("Avg Predicted Solution Size", string(round(avg_model_score, digits=2))),
-            ("Approximation Ratio (\\%)", string(round(performance_pct, digits=2))),
-            ("Approximation Ratio Std Dev (\\%)", isnan(approx_ratio_std) ? "N/A" : string(round(approx_ratio_std, digits=2))),
-            ("Approximation Ratio 95\\% CI (\\%, ±)", isnan(approx_ratio_ci95) ? "N/A" : string(round(approx_ratio_ci95, digits=2))),
+            ("Avg Reference Solution Score", string(round(avg_true_score, digits=2))),
+            ("Avg Predicted Solution Score", string(round(avg_model_score, digits=2))),
+            ("Mean Per-Instance Ratio vs. Reference (%)", _fmt(performance_pct; digits=2)),
+            ("Per-Instance Ratio Std Dev (%)", _fmt(approx_ratio_std; digits=2)),
+            ("Per-Instance Ratio 95% CI (%, ±)", _fmt(approx_ratio_ci95; digits=2)),
+            ("Ratio of Average Scores (%)", _fmt(ratio_of_means_pct; digits=2)),
+            ("Random Heatmap Baseline, Mean Ratio (%, $(num_random_baseline) draws)", "$(_fmt(random_pct; digits=2)) ± $(_fmt(random_ci95; digits=2))"),
+            ("Degree Heuristic Baseline, Mean Ratio (%)", "$(_fmt(degree_pct; digits=2)) ± $(_fmt(degree_ci95; digits=2))"),
             ("Total Inference Time (s)", string(round(total_inference_time, digits=4))),
             ("Avg Inference Time / Instance (s)", string(round(avg_inference_time_per_instance, digits=4))),
         ]
-        if !isnothing(ood_generator)
-            append!(results_rows, [
-                ("OOD Generator", string(typeof(ood_generator))),
-                ("OOD Test Instances", string(ood_num_test)),
-            ])
-        end
         write_latex_kv_table(io, results_rows; caption="Results and performance metrics for run $(run_id)", label="tab:results-$(label_base)")
 
         println(io, "\\subsubsection{Heatmap Quality}")
         write_latex_kv_table(io, [
-            ("Avg Pseudo-Entropy \$1 - \\bar{D}\$ (lower = more decisive)", string(round(avg_entropy, digits=4))),
-            ("Avg Decisiveness Score \$\\bar{D} = mean(|2p-1|)\$ (higher = better)", string(round(avg_confidence, digits=4))),
-            ("Avg Greedy Correction Rate", string(round(avg_correction_rate, digits=4))),
-        ]; caption="Heatmap decisiveness (mean deviation from 0.5) and greedy-decoding correction metrics for run $(run_id)", label="tab:heatmap-$(label_base)")
+            ("Avg Pseudo-Entropy 1 - D (lower = more decisive)", string(round(avg_entropy, digits=4))),
+            ("Avg Decisiveness Score D = mean(|2p-1|) (higher = better)", string(round(avg_confidence, digits=4))),
+            ("Avg Greedy Correction Rate", corr_rate_str),
+        ]; caption="Heatmap decisiveness and greedy-decoding correction metrics for run $(run_id)", label="tab:heatmap-$(label_base)")
 
         println(io, "\\subsubsection{Inference Stability}")
         write_latex_kv_table(io, [
             ("Repeated Inferences on Last Instance", string(num_repeat_inference)),
-            ("Avg Normalized Hamming Distance across repeats", isnan(avg_hamming_stability) ? "N/A" : string(round(avg_hamming_stability, digits=4))),
-        ]; caption="Repeated-inference stability metrics for run $(run_id)", label="tab:stability-$(label_base)")
+            ("Avg Normalized Solution Distance across repeats" * (symmetric ? " (complement-invariant)" : ""), _fmt(avg_hamming_stability)),
+        ]; caption="Repeated-inference stability metrics for run $(run_id). Measured at batch size 1; BatchNorm normalizes over the whole batch (also in test mode), so heatmaps in the main evaluation (batch size $(batch_size)) also depend on the co-batched graphs", label="tab:stability-$(label_base)")
     end
 
     @info "LaTeX report saved to $filepath"
@@ -400,15 +511,10 @@ end
 """
     latex_escape(s)
 
-Escapes LaTeX special characters in a value before embedding it in generated
-`.tex` output (run_ids, type names, etc. commonly contain `_`).
+Escapes LaTeX special characters in a value before embedding it in generated `.tex` output.
 
-NOTE: this function still has the A14 double-escaping bug (backslash
-substitution runs before the brace-escaping loop, so a literal backslash in
-`s` would come out as `\\textbackslash\\{\\}` instead of
-`\\textbackslash{}`). A14 was not in this round's requested fix list (B10,
-B11, B12, C6, D4, D5, D6, B7), so it is left exactly as it was — flagging
-here so it isn't mistaken for an oversight.
+NOTE: still has the A14 double-escaping bug (backslash substitution runs before the brace-escaping
+loop). Not in scope of this round; left as is and flagged so it isn't mistaken for an oversight.
 """
 function latex_escape(s)
     str = string(s)
@@ -431,7 +537,7 @@ Writes a simple two-column `Parameter | Value` LaTeX table.
 function write_latex_kv_table(io, rows::Vector{<:Tuple}; caption=nothing, label=nothing)
     println(io, "\\begin{table}[h!]")
     println(io, "\\centering")
-    println(io, "\\begin{tabular}{ll}")
+    println(io, "\\begin{tabular}{p{0.42\\linewidth}p{0.5\\linewidth}}")   # p-columns wrap long values
     println(io, "\\toprule")
     println(io, "\\textbf{Parameter} & \\textbf{Value} \\\\")
     println(io, "\\midrule")

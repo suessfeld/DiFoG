@@ -1,7 +1,3 @@
-# src/problems/maxcut.jl
-#
-# Gurobi-based exact solver and heatmap decoding for the Maximum Cut (MAXCUT) problem, delegating the ILP formulation to NodeSelectionProblems.jl.
-
 using Graphs
 using JuMP
 
@@ -9,8 +5,11 @@ export MaxCutSolver
 
 """
     MaxCutSolver <: ProblemSolver
-    
-A solver that solves the Maximum Cut Problem with the usage of Gurobi.
+
+A solver that solves the Maximum Cut Problem using Gurobi.
+
+Fields:
+    - 'time_limit': The maximum time limit allowed for the Gurobi solver.
 """
 struct MaxCutSolver <: ProblemSolver
     time_limit::Float64
@@ -19,19 +18,24 @@ end
 MaxCutSolver(; time_limit::Float64=0.5) = MaxCutSolver(time_limit)
 
 """
+    label_symmetric(::MaxCutSolver)
+
+Indicates whether the training loss should be flip-invariant, as a cut and its complement represent the exact same solution.
+"""
+label_symmetric(::MaxCutSolver) = true
+
+"""
     (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
 
-Solves MaxCut for `g` via Gurobi. Delegates ILP formulation to `ILP!`/`NSPInstance{MAXCUT}`, and
-session management/retry to `with_gurobi_retry` (see `gurobi_session.jl`) — this function only
-describes how to build and read out a MaxCut solve; it knows nothing about sessions or retries.
+Solves the Maximum Cut problem for the given graph using Gurobi, delegating the ILP formulation and handling session retries.
 
 Parameters:
+    - 'solver': The MaxCutSolver instance.
     - 'g': The graph instance to solve MaxCut for.
 """
 function (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
     n = nv(g)
     x_0 = zeros(Float32, 1, n)
-    gap = NaN
 
     result = with_gurobi_retry() do env
         inst = NSPInstance(MAXCUT(), g, n, ne(g), Ref{Union{Nothing, JuMP.Model}}(nothing), (;))
@@ -39,21 +43,21 @@ function (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
              env=env, threads=GRB_THREADS[])
     end
 
-    if !isnothing(result)
-        sol, status, rel_gap, solve_time = result
-        for i in 1:sol.sel
-            x_0[1, sol.x[i]] = 1.0f0
-        end
+    isnothing(result) && error("MaxCutSolver: Gurobi failed twice for a graph with $(nv(g)) nodes — refusing to emit an empty label.")
 
-        degs = degree(g)
-        max_deg_node = argmax(degs)
-        # cut is invariant under S ↔ V∖S, so the flip leaves the gap unchanged
-        if x_0[1, max_deg_node] == 0.0f0
-            x_0 .= 1.0f0 .- x_0
-        end
-
-        gap = Float64(rel_gap)
+    sol, status, rel_gap, solve_time = result
+    for i in 1:sol.sel
+        x_0[1, sol.x[i]] = 1.0f0
     end
+
+    degs = degree(g)
+    max_deg_node = argmax(degs)
+    
+    if x_0[1, max_deg_node] == 0.0f0
+        x_0 .= 1.0f0 .- x_0
+    end
+
+    gap = Float64(rel_gap)
 
     return x_0, gap
 end
@@ -61,22 +65,49 @@ end
 """
     decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
 
-Simple decoding strategy for maxcut. Divides the set into two subsets, one set includes all values p > 0.5, the other one p < 0.5.
+Decodes the predicted heatmap into a binary partition using a 0.5 threshold.
 
 Parameters:
-    - 'g': The graph representing the problem instance (unused, kept for signature consistency with other `decode_heatmap` methods).
-    - 'heatmap': The predicted heatmap.
+    - 'g': The graph structure.
+    - 'heatmap': The predicted heatmap vector to be decoded.
 """
 function decode_heatmap(::MaxCutSolver, g::GNNGraph, heatmap::AbstractVector)
     return vec(heatmap) .> 0.5f0
 end
 
 """
+    degree_baseline_heatmap(::MaxCutSolver, g::GNNGraph)
+
+Calculates a baseline heatmap by visiting nodes in descending degree order and placing each node on the side with fewer already-placed neighbors.
+
+Parameters:
+    - 'g': The graph structure.
+"""
+function degree_baseline_heatmap(::MaxCutSolver, g::GNNGraph)
+    n = g.num_nodes
+    s, t = edge_index(g)
+    adj = [Int[] for _ in 1:n]
+    for i in eachindex(s)
+        push!(adj[s[i]], t[i])
+    end
+
+    side = zeros(Int8, n)
+    for v in sortperm(length.(adj), rev=true)
+        in_s  = count(u -> side[u] == 1, adj[v])
+        in_vs = count(u -> side[u] == -1, adj[v])
+        side[v] = in_s <= in_vs ? Int8(1) : Int8(-1)
+    end
+    return Float32.(side .== 1)
+end
+
+"""
     evaluate(::MaxCutSolver, g::GNNGraph, mask::AbstractVector)
 
-MAXCUT objective: |{(u,v) ∈ E : mask[u] ≠ mask[v]}|, i.e. the number of edges
-crossing the cut induced by `mask`. `edge_index(g)` stores each undirected
-edge twice (once per direction), hence the `÷ 2`.
+Evaluates the Maximum Cut objective value for a given partition mask.
+
+Parameters:
+    - 'g': The graph structure.
+    - 'mask': A binary vector representing the node partition.
 """
 function evaluate(::MaxCutSolver, g::GNNGraph, mask::AbstractVector)
     s, t = edge_index(g)

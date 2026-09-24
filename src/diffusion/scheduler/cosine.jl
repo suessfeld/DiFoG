@@ -1,21 +1,23 @@
 # src/diffusion/scheduler/cosine.jl
 #
-# Implements a cosine denoising schedule to control the noise ratios during the forward and reverse diffusion processes.
+# Cosine inference time-step spacing (DIFUSCO §3.3). This only selects WHICH times of the training
+# process are visited at inference; it does not change the forward noise schedule β (always the linear
+# DIFUSCO β, see `get_betas`).
 
 export CosineScheduler
 using Functors
 
 """
-    CosineScheduler{T} <: Scheduler{T}
+    CosineScheduler{T} <: TimeSchedule{T}
 
-Implements the cosine denoising schedule, as used in the DIFUSCO paper.
+Represents a cosine inference time-step spacing schedule, concentrating steps in the low-noise regime.
 
 Fields:
-    - `total_steps`: The total number of steps used during the forward training process.
-    - `inference_steps`: The desired sequence length for the reverse process, where inference_steps < total_steps.
-    - `steps`: The calculated sequence of timesteps τ.
+    - 'total_steps': The total number of steps in the training process.
+    - 'inference_steps': The number of transitions used during inference.
+    - 'steps': The generated sequence of ascending steps (Int for diffusion time, Float32 for progress).
 """
-struct CosineScheduler{T} <: Scheduler{T}
+struct CosineScheduler{T} <: TimeSchedule{T}
     total_steps::Int
     inference_steps::Int
     steps::Vector{T}
@@ -26,40 +28,36 @@ Functors.@leaf CosineScheduler
 CosineScheduler(total_steps::Int, inference_steps::Int) = CosineScheduler(Int, total_steps, inference_steps)
 
 """
-    CosineScheduler(::Type{Int}, total_steps::Int, inference_steps::Int)
+    _cosine_progress(T::Int, M::Int)
 
-Constructs a CosineScheduler with integer timesteps.
+Calculates the integer progress points for the cosine schedule.
+
+Parameters:
+    - 'T': The total number of training steps.
+    - 'M': The number of inference transitions.
 """
-function CosineScheduler(::Type{Int}, total_steps::Int, inference_steps::Int)
-    if inference_steps >= total_steps
-        return CosineScheduler{Int}(total_steps, inference_steps, collect(0:total_steps))
-    end
-
-    c = 1.0 / inference_steps
-    steps = vcat(0, [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps])
-    @debug "Steps from CosineScheduler: " steps
-
-    return CosineScheduler{Int}(total_steps, inference_steps, steps)
+function _cosine_progress(T::Int, M::Int)
+    M >= T && return collect(0:T)
+    c = 1.0 / M
+    # p_M = T set explicitly; the cos expression itself is unchanged so no value shifts through floor
+    return vcat(0, [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * T)) for i in 1:M-1], T)
 end
 
 """
-    CosineScheduler(::Type{Float32}, total_steps::Int, inference_steps::Int)
+    CosineScheduler(::Type{VT}, total_steps::Int, inference_steps::Int) where {VT<:Union{Int,Float32}}
 
-Constructs a CosineScheduler with normalized Float timesteps.
+Constructs a CosineScheduler using the specified type for step representation.
+
+Parameters:
+    - 'VT': The target type for the steps (Int or Float32).
+    - 'total_steps': The total number of training steps.
+    - 'inference_steps': The number of inference transitions.
 """
-function CosineScheduler(::Type{Float32}, total_steps::Int, inference_steps::Int)
-    if inference_steps >= total_steps
-        steps = collect(0:total_steps) ./ Float32(total_steps)
-        return CosineScheduler{Float32}(total_steps, inference_steps, steps)
-    end
-
-    c = 1.0 / inference_steps
-    steps_int = [max(1, floor(Int, cos(((1.0 - c * i) * π) / 2.0) * total_steps)) for i in 1:inference_steps]
-    steps = vcat(0.0f0, Float32.(steps_int) ./ Float32(total_steps))
+function CosineScheduler(::Type{VT}, total_steps::Int, inference_steps::Int) where {VT<:Union{Int,Float32}}
+    steps = _progress_steps(VT, _cosine_progress(total_steps, inference_steps), total_steps)
     @debug "Steps from CosineScheduler: " steps
-
-    return CosineScheduler{Float32}(total_steps, inference_steps, steps)
+    return CosineScheduler{VT}(total_steps, inference_steps, steps)
 end
 
-Base.convert(::Type{Scheduler{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)
+Base.convert(::Type{TimeSchedule{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)
 Base.convert(::Type{CosineScheduler{T}}, s::CosineScheduler) where {T} = CosineScheduler(T, s.total_steps, s.inference_steps)

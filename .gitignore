@@ -30,9 +30,11 @@ workspace/indent.log
 
 /results/instances/
 /results/models/
+/results/graphs
+/results/reports
 /results_50_100/
 
-/test/evaluation/misp_flow_matching_er_50_100_12_256_cosine_50.jl
+/test/evaluation/evaluate_single.jl
 
 /.vscode
 gurobi.lic

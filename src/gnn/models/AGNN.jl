@@ -1,12 +1,7 @@
-# src/gnn/models/AGNN.jl
-#
-# Implements the Anisotropic Graph Neural Network (AGNN) backbone, handling message passing and feature extraction for both nodes and edges.
-
 using Flux
 using Statistics
 using GraphNeuralNetworks
 using NNlib
-using CUDA
 using Zygote: ignore_derivatives
 
 export AGNN
@@ -14,7 +9,11 @@ export AGNN
 """
     OutputHead
 
-Final node-wise prediction head: BatchNorm + ReLU + Dense.
+Final node-wise prediction head applying batch normalization, ReLU activation, and a dense layer.
+
+Fields:
+    - 'bn': The batch normalization layer.
+    - 'linear': The dense layer for output projection.
 """
 struct OutputHead
     bn     :: BatchNorm
@@ -31,13 +30,27 @@ OutputHead(d::Int, output_dim::Int) = OutputHead(
     (m::OutputHead)(h::AbstractMatrix)
 
 Maps hidden node features to output logits.
+
+Parameters:
+    - 'm': The OutputHead instance.
+    - 'h': The hidden node features matrix.
 """
 (m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))
 
 """
     AGNNLayer
 
-One anisotropic message-passing layer, updating both node (`h`) and edge (`e`) features.
+Constructs an anisotropic message-passing layer for updating node and edge features.
+
+Fields:
+    - 'U': Dense layer for node feature transformation.
+    - 'V': Dense layer for neighbor feature transformation.
+    - 'A': Dense layer for edge feature computation (source).
+    - 'B': Dense layer for edge feature computation (target).
+    - 'C': Dense layer for edge feature computation (edge).
+    - 'norm_h': Batch normalization for node features.
+    - 'norm_e': Batch normalization for edge features.
+    - 'mlp_e': Multi-layer perceptron for final edge feature update.
 """
 struct AGNNLayer
     U      :: Dense
@@ -65,8 +78,13 @@ AGNNLayer(d::Int) = AGNNLayer(
 """
     (layer::AGNNLayer)(g::GNNGraph, h::AbstractMatrix, e::AbstractMatrix)
 
-Computes one anisotropic node/edge update step: gated message passing for `h`,
-edge-gate MLP for `e`. Returns `(h_delta, e_delta)`.
+Performs a single anisotropic update step for node and edge features.
+
+Parameters:
+    - 'layer': The AGNNLayer instance.
+    - 'g': The graph structure.
+    - 'h': The current node features matrix.
+    - 'e': The current edge features matrix.
 """
 function (layer::AGNNLayer)(g::GNNGraph, h::AbstractMatrix, e::AbstractMatrix)
     s, t = edge_index(g)
@@ -91,7 +109,15 @@ end
 """
     AGNN <: GNN
 
-Implementation of the Ansiotropic Graph Neural Network proposed by Laurent & Bresson 2018.
+Represents the Anisotropic Graph Neural Network backbone for message passing and feature extraction.
+
+Fields:
+    - 'config': The configuration object for the GNN.
+    - 'feature_dim': The dimensionality of the input node features.
+    - 'node_embed': The dense layer for initial node embedding.
+    - 'layers': A vector of anisotropic message-passing layers.
+    - 'time_layers': A vector of chains processing the timestep embeddings.
+    - 'output_head': The final output prediction head.
 """
 struct AGNN <: GNN
     config      :: GNNConfig
@@ -104,92 +130,63 @@ end
 Flux.@layer AGNN
 
 """
-    AGNN(config::GNNConfig, feature_dim::Int=1)
+    AGNN(config::GNNConfig)
 
-Builds an `AGNN` with `config.num_layers` `AGNNLayer`s, sized from `config`.
-`feature_dim` is the raw node-state width; the remainder of `config.in_dim`
-is treated as timestep-embedding width.
+Builds an AGNN model based on the provided configuration.
+
+Parameters:
+    - 'config': The configuration object specifying layer counts and dimensions.
 """
-function AGNN(config::GNNConfig, feature_dim::Int=1)
-    d        = config.hidden_dim
-    time_dim = config.in_dim - feature_dim
-    L        = config.num_layers
-
-    @assert time_dim > 0 "in_dim ($(config.in_dim)) must be > feature_dim ($feature_dim)"
+function AGNN(config::GNNConfig)
+    d = config.hidden_dim
+    L = config.num_layers
 
     return AGNN(
         config,
-        feature_dim,
-        Dense(feature_dim, d, relu),
+        config.in_dim,
+        Dense(config.in_dim, d, relu),
         [AGNNLayer(d) for _ in 1:L],
-        [Chain(Dense(time_dim, d, relu), Dense(d, d)) for _ in 1:L],
+        [Chain(Dense(config.time_dim, d, relu), Dense(d, d)) for _ in 1:L],
         OutputHead(d, config.output_dim),
     )
 end
 
 """
-    (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
+    (model::AGNN)(g::GNNGraph, x_t::AbstractMatrix, t_emb::AbstractMatrix)
 
-Forward pass: splits `x_input` into raw state and timestep embedding, embeds
-nodes, runs `L` message-passing layers (feeding the time embedding into each
-edge update), and returns per-node output logits.
+Executes the forward pass of the network, updating node and edge states with time embeddings across all layers.
+
+Parameters:
+    - 'model': The AGNN model instance.
+    - 'g': The graph structure containing batch information.
+    - 'x_t': The node state matrix at the current timestep.
+    - 't_emb': The per-graph timestep embedding matrix.
 """
-#GR TODO Claude meint hier: Time MLP evaluated per edge: `t_emb_edges = t_emb[:, s]` then `time_layers[i](…)` over all E
-#   columns in each of 12 layers (`AGNN.jl:147-155`) although there are only `num_graphs` distinct
-#   columns. For 16 × 350-node ER graphs (~150k directed edges) ~90 % of the time-MLP FLOPs, forward and
-#   backward, are redundant. Compute on `(time_dim, num_graphs)` and gather by `graph_indicator[s]`.
-function (model::AGNN)(g::GNNGraph, x_input::AbstractMatrix)
-    fd = model.feature_dim
-    x_t   = x_input[end-fd+1:end, :]
-    t_emb = x_input[1:end-fd, :]
+function (model::AGNN)(g::GNNGraph, x_t::AbstractMatrix, t_emb::AbstractMatrix)
+    @assert size(x_t, 1) == model.feature_dim "node state width $(size(x_t, 1)) ≠ in_dim $(model.feature_dim)"
+    @assert size(t_emb, 1) == model.config.time_dim "time embedding width $(size(t_emb, 1)) ≠ time_dim $(model.config.time_dim)"
 
     h = model.node_embed(x_t)
+    
     e = ignore_derivatives() do
-        CUDA.zeros(Float32, model.config.hidden_dim, g.num_edges)
+        fill!(similar(h, model.config.hidden_dim, g.num_edges), 0f0)
     end
 
-    s, _ = edge_index(g)
-    t_emb_edges = t_emb[:, s]
+    edge_graph = ignore_derivatives() do
+        isnothing(g.graph_indicator) ? nothing : g.graph_indicator[edge_index(g)[1]]
+    end
 
     for i in eachindex(model.layers)
         h_in, e_in = h, e
         h_delta, e_delta = model.layers[i](g, h, e)
+        
         h = h_in .+ h_delta
-        e = e_in .+ e_delta .+ model.time_layers[i](t_emb_edges)
+        
+        t_graph = model.time_layers[i](t_emb)
+        t_edge = isnothing(edge_graph) ? t_graph : NNlib.gather(t_graph, edge_graph)
+        
+        e = e_in .+ e_delta .+ t_edge
     end
 
     return model.output_head(h)
 end
-
-
-#GR TODO Claude zeigt in Bezug auf die GPU/Flux folgende teils sehr wesentliche Probleme in Bezug auf Effizienz auf: Bitte durchdenken und auch hier kommentieren, wie Sie das sehen bzw. was geändert wurde:
-# - **P1** Time MLP evaluated per edge: `t_emb_edges = t_emb[:, s]` then `time_layers[i](…)` over all E
-#   columns in each of 12 layers (`AGNN.jl:147-155`) although there are only `num_graphs` distinct
-#   columns. For 16 × 350-node ER graphs (~150k directed edges) ~90 % of the time-MLP FLOPs, forward and
-#   backward, are redundant. Compute on `(time_dim, num_graphs)` and gather by `graph_indicator[s]`.
-# - **P2** Schedule constants recomputed and re-uploaded per call: `get_alphas` (CPU `range` + `cumprod`
-#   + `|> gpu`) once per training batch in `q` and twice per denoising step in `posterior_prob`
-#   (`bernoulli_diffusion.jl:68,139-146`), each a sync point; `get_timestep_embedding` rebuilds and uploads
-#   `freqs` every forward pass and allocates `hcat` + `permutedims` (`diffusion_model.jl:254-263`).
-# - **P3** `_mat(g::AbstractVector) = map(_mat, g)` (`diffusion_model.jl:166`) matches every `CuVector`
-#   bias/γ/β gradient: an extra kernel launch and copy per array per step (~140 arrays), while matrices
-#   pass through untouched. Zygote already unthunks; delete `_mat` or guard on `AbstractArray{<:Number}`.
-# - **P4** Pack-then-unpack of `[t_emb; x_t]` (`build_model_input` → `AGNN` slices it apart): two
-#   allocations per forward and the awkward `in_dim = 33` convention. Pass `(g, x_t, t_emb)`.
-# - **P5** Hard CUDA calls (`CUDA.rand/fill/zeros`) in `bernoulli_diffusion.jl`,
-#   `discrete_flow_matching.jl`, `AGNN.jl:144`, `diffusion_model.jl:261`: nothing runs on CPU, so no
-#   model/method unit test can run without a GPU and `Flux.gpu` fallback is broken. Use `similar`/`rand!`.
-# - **P6** DFM differentiates `κ.(t)`/`κ̇.(t)` broadcasts of a boxed `Function` field inside
-#   `withgradient` though they are constants; hoist `velocity_scale`. Second forward pass is paid even
-#   for `λ_cons == 0`. `Function`-typed fields make `DiscreteFlowMatching`/`ATSSScheduler` type-unstable.
-# - **P7** Training timings have no `CUDA.synchronize()` (`diffusion_model.jl:125-139`): backward and
-#   optimizer work leak into the next iteration's "GPU Wait time (for solver)", so both logged numbers
-#   are unreliable. DFM `sample_heatmap` logs `@info` with the full step vector on every call (`:195`;
-#   Bernoulli uses `@debug`) inside the timed region.
-# - **P8** `_validation_loss` runs a discarded backward pass (2 forwards + backward for DFM); validation
-#   instances are solved serially on the main thread with one env idle (`test_utils.jl:80-85`).
-# - **P9** ATSS fit: `lookup_x` does `argmin(abs.(fine_grid .- t))` (allocating linear scan) for every
-#   cost evaluation although t is a grid point; ~10⁹ ops for S = 1000, T = 50, plus a Gurobi solve at
-#   scheduler construction. `BasicGraphGenerator` materializes and shuffles all O(n²) non-tree pairs per
-#   graph. Each label rebuilds a JuMP model whose build time is outside the time limit.
-# - **P10** `workers = 12` vs `NUM_GUROBI_LICENSES = 2`: ten tasks permanently blocked on `take!`.

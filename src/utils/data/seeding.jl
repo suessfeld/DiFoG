@@ -10,10 +10,10 @@ export create_dataset
 """
     _valid_line_count(path::AbstractString)
 
-Counts complete, well-formed data lines in an existing dataset CSV (header excluded). Stops at the
-first line that doesn't split into exactly 2 comma-separated fields — this guards against a
-truncated last line left behind by a crash mid-write, so that line is not counted (and is dropped
-below before appending, rather than kept as corrupt data).
+Counts complete, well-formed data lines in an existing dataset CSV, excluding the header. Stops at the first malformed line to guard against truncated data from crashes.
+
+Parameters:
+    - 'path': The file path to the CSV dataset.
 """
 function _valid_line_count(path::AbstractString)
     n = 0
@@ -30,9 +30,11 @@ end
 """
     _truncate_to_valid!(path::AbstractString, valid_count::Int)
 
-Rewrites `path` to keep only the header plus its first `valid_count` data lines, dropping anything
-after (e.g. a crash-truncated trailing line). No-op if the file already has exactly `valid_count`
-data lines.
+Rewrites the dataset CSV to retain only the header and the specified number of valid data lines, discarding any subsequent corrupted lines.
+
+Parameters:
+    - 'path': The file path to the CSV dataset.
+    - 'valid_count': The number of valid data lines to retain.
 """
 function _truncate_to_valid!(path::AbstractString, valid_count::Int)
     lines = readlines(path)
@@ -46,31 +48,16 @@ function _truncate_to_valid!(path::AbstractString, valid_count::Int)
 end
 
 """
-    create_dataset(seed::Integer, filepath::AbstractString, generator::GraphGenerator,
-                   solver::ProblemSolver, num_instances::Int)
+    create_dataset(seed::Integer, filepath::AbstractString, generator::GraphGenerator, solver::ProblemSolver, num_instances::Int)
 
-Generates instances from a single `Xoshiro(seed)` stream, solves them, and writes
-`<filepath>/<seed>.csv` with one line `gap,bitmask` per instance (line i ↔ instance i).
-
-If `<filepath>/<seed>.csv` already exists:
-    - with `≥ num_instances` valid lines: nothing is generated or solved; the path is returned as-is.
-    - with `< num_instances` valid lines: the RNG is fast-forwarded past the existing instances
-      (by calling `generator(rng)` for each and discarding the graph — cheap, no solving) so the
-      newly generated instances continue the exact same stream position they would have had if
-      `num_instances` had been requested from the start. Only the missing instances are then solved
-      and appended.
-    - with a truncated/corrupt trailing line (e.g. a crash mid-write): that line is dropped before
-      any of the above, so it is regenerated rather than left as corrupt data.
-
-Generation is sequential, so instance i is fully determined by (seed, i, generator parameters).
-Regenerating it means calling `generator(rng)` i times on a fresh `Xoshiro(seed)`; no solving is needed.
+Generates and solves graph instances from a seeded random stream, appending missing instances to a CSV file if it already exists. Ensures the RNG stream is fast-forwarded to maintain deterministic generation.
 
 Parameters:
-    - 'seed': The RNG seed; also the filename.
-    - 'filepath': The directory the CSV is written to.
-    - 'generator': The graph generator, called as `generator(rng)`.
-    - 'solver': The problem solver.
-    - 'num_instances': The number of instances the file should contain after this call.
+    - 'seed': The RNG seed used for deterministic generation and as the filename.
+    - 'filepath': The directory where the CSV is written.
+    - 'generator': The graph generator used to instantiate graphs.
+    - 'solver': The problem solver used to compute the exact solutions.
+    - 'num_instances': The target total number of instances the file should contain.
 """
 function create_dataset(seed::Integer, filepath::AbstractString, generator::GraphGenerator,
                         solver::ProblemSolver, num_instances::Int)

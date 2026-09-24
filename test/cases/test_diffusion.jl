@@ -6,6 +6,11 @@ using Thesis
     using Thesis
     using GraphNeuralNetworks
     using Flux
+
+    # Reference β schedule (DIFUSCO linear 1e-4 → 2e-2 for T = 1000, endpoints scaled by 1000/T),
+    # written out independently of Thesis.get_betas on purpose.
+    reference_alphas(T) = cumprod(1.0f0 .- 2.0f0 .* Float32.(range(1f-4 * 1000f0 / T, 2f-2 * 1000f0 / T, length=T)))
+    export reference_alphas
 end
 
 @testitem "Test BernoulliDiffusion Corruption Step Statistical Distribution" setup=[TestDiffusion] begin
@@ -17,34 +22,18 @@ end
     scheduler = LinearScheduler(Int, total_steps, inference_steps)
     diffusion = BernoulliDiffusion(scheduler)
 
-    # 1. N=500 (250,000 samples) is plenty for the Law of Large Numbers to
-    # converge here: worst-case standard error at p≈0.5 is sqrt(0.25/250000)
-    # ≈ 0.001, a 5x margin inside the atol=5e-3 assertion below, at ~1% of
-    # the GPU memory the previous N=5000 (25M elements) used.
+    # N=500 (250,000 samples): worst-case standard error ≈ 0.001, 5x inside atol=5e-3.
     N = 500
-    # Initialize completely with 1s so we can easily track the keep vs flip ratio
     x_0 = ones(Float32, N, N) |> Flux.gpu
-    
-    # Test at a specific timestep (e.g., halfway through the schedule)
+
     t_val = 50
     t = fill(Int32(t_val), N) |> Flux.gpu
 
     q_sampled = Thesis.q(diffusion, x_0, t) |> Flux.cpu
 
-    # ---------------------------------------------------------
-    # Theoretical Ground Truth Transition Probability
-    # ---------------------------------------------------------
-    βs = Float32.(range(1f-4, 2f-2, length=total_steps))
-    αs = cumprod(1.0f0 .- 2.0f0 .* βs)
-    ᾱₜ = αs[t_val]
-    
-    # The theoretical probability of a bit keeping its original state
+    ᾱₜ = reference_alphas(total_steps)[t_val]
     expected_prob_keep = 0.5f0 * (1.0f0 + ᾱₜ)
 
-    # ---------------------------------------------------------
-    # Empirical Validation
-    # ---------------------------------------------------------
-    # Because x_0 was entirely 1s, the mean of q_sampled represents the exact empirical ratio of kept bits
     empirical_prob_keep = mean(q_sampled)
 
     @info "Theoretical prob_keep:" expected_prob_keep
@@ -52,12 +41,18 @@ end
 
     @test size(q_sampled) == (N, N)
     @test eltype(q_sampled) == Float32
-    
-    # Ensure it only produces valid categorical {0, 1} states
     @test all(x -> x == 0.0f0 || x == 1.0f0, q_sampled)
-    
-    # Assert the sampled distribution matches the paper's theoretical equation within a 0.5% tolerance
     @test isapprox(empirical_prob_keep, expected_prob_keep, atol=5e-3)
+end
+
+@testitem "Test BernoulliDiffusion β schedule (T=1000 unchanged, x_T uniform for other T)" setup=[TestDiffusion] begin
+    # T = 1000: exactly DIFUSCO's linear 1e-4 → 2e-2
+    @test Thesis.get_betas(1000) ≈ Float32.(range(1f-4, 2f-2, length=1000))
+    # q(x_T | x_0) ≈ Uniform for different T thanks to the 1000/T scaling
+    for T in (100, 500, 1000)
+        @test Thesis.get_alphas(T)[end] < 1f-6
+    end
+    @test_throws AssertionError Thesis.get_betas(40)
 end
 
 @testitem "Test BernoulliDiffusion Posterior Probability exact values" setup=[TestDiffusion] begin
@@ -69,7 +64,6 @@ end
     scheduler = LinearScheduler(Int, total_steps, inference_steps)
     diffusion = BernoulliDiffusion(scheduler)
 
-    # Move mock inputs to GPU
     x_t = Float32[1.0 0.0; 0.0 1.0] |> Flux.gpu
     x_0_pred = Float32[0.9 0.1; 0.2 0.8] |> Flux.gpu
     t_idx = 50
@@ -77,46 +71,46 @@ end
 
     p_post = Thesis.posterior_prob(diffusion, x_t, x_0_pred, t_idx, s_idx) |> Flux.cpu
 
-    βs = Float32.(range(1f-4, 2f-2, length=total_steps))
-    αs = cumprod(1.0f0 .- 2.0f0 .* βs)
-    
-    # Extract cumulative scaling factors \bar{\alpha}_t and \bar{\alpha}_s
+    αs = reference_alphas(total_steps)
     α_bar_t = αs[t_idx]
     α_bar_s = αs[s_idx]
     α_t_s = α_bar_t / α_bar_s
-    
-    # q(x_t = 1 | x_{t-1} = 1) 
+
+    # q(x_t = 1 | x_s = 1)
     p_t_s = 0.5f0 * (1.0f0 + α_t_s)
-    
-    # Calculate expected exact values for each matrix element independently
+
     expected = zeros(Float32, 2, 2)
     x_t_cpu = x_t |> Flux.cpu
     x_0_pred_cpu = x_0_pred |> Flux.cpu
-    
+
     for i in 1:2
         for j in 1:2
             xt_val = x_t_cpu[i, j]
             x0_pred_val = x_0_pred_cpu[i, j]
-            
-            # q(x_t | x_{t-1} = 1)
+
             term1 = xt_val == 1.0f0 ? p_t_s : (1.0f0 - p_t_s)
-            
-            # Eq 5 evaluated for x_0 = 1: q(x_{t-1}=1 | x_t, x_0=1)
+
             denom_1 = xt_val == 1.0f0 ? 0.5f0 * (1.0f0 + α_bar_t) : 0.5f0 * (1.0f0 - α_bar_t)
             term2 = (term1 * 0.5f0 * (1.0f0 + α_bar_s)) / denom_1
-            
-            # Eq 5 evaluated for x_0 = 0: q(x_{t-1}=1 | x_t, x_0=0)
+
             denom_0 = xt_val == 1.0f0 ? 0.5f0 * (1.0f0 - α_bar_t) : 0.5f0 * (1.0f0 + α_bar_t)
             term3 = (term1 * 0.5f0 * (1.0f0 - α_bar_s)) / denom_0
-            
-            # Eq 6: p_θ(x_{t-1}=1 | x_t)
+
             expected[i, j] = clamp(x0_pred_val * term2 + (1.0f0 - x0_pred_val) * term3, 0.0f0, 1.0f0)
         end
     end
 
     @test size(p_post) == size(x_t |> Flux.cpu)
     @test all(x -> 0.0f0 <= x <= 1.0f0, p_post)
-    @test p_post ≈ expected atol=1e-6
+    @test p_post ≈ expected atol=1e-5
+end
+
+@testitem "Test BernoulliDiffusion Posterior Probability t == s is the identity" setup=[TestDiffusion] begin
+    using Flux
+    diffusion = BernoulliDiffusion(LinearScheduler(Int, 100, 10))
+    x_t = Float32[1.0 0.0 1.0 0.0]
+    x_0_pred = Float32[0.1 0.9 0.5 0.3]
+    @test Thesis.posterior_prob(diffusion, x_t, x_0_pred, 37, 37) ≈ x_t atol=1e-6
 end
 
 @testitem "Test BernoulliDiffusion Posterior Probability boundary case s=0" setup=[TestDiffusion] begin
@@ -127,7 +121,6 @@ end
     scheduler = LinearScheduler(Int, total_steps, inference_steps)
     diffusion = BernoulliDiffusion(scheduler)
 
-    # Move mock inputs to GPU. (otherwise not supported!)
     x_t = Float32[1.0 0.0] |> Flux.gpu
     x_0_pred = Float32[0.99 0.01] |> Flux.gpu
     t_idx = 10

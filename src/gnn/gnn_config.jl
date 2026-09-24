@@ -1,24 +1,39 @@
 # src/gnn/gnn_config.jl
 #
-# Configuration struct defining the hyperparameters and dimensionalities (layers, input/hidden/output dims) for the GNN models.
+# Configuration struct defining the hyperparameters and dimensionalities (layers, input/time/hidden/output
+# dims) for the GNN models.
 
 export GNNConfig
 using Functors
 
 """
     GNNConfig
-    
-Represents a basic configuration of a GNN. 
+
+Defines the basic configuration, hyperparameters, and dimensionalities for the GNN models.
+
+Fields:
+    - 'num_layers': The number of message-passing layers.
+    - 'in_dim': The width of the input node state.
+    - 'time_dim': The width of the sinusoidal timestep embedding.
+    - 'hidden_dim': The hidden dimension width.
+    - 'output_dim': The number of output logits per node.
 """
 struct GNNConfig
     num_layers::Int
     in_dim::Int
+    time_dim::Int
     hidden_dim::Int
     output_dim::Int
+
+    function GNNConfig(num_layers::Int, in_dim::Int, time_dim::Int, hidden_dim::Int, output_dim::Int)
+        @assert num_layers >= 1 "num_layers must be ≥ 1"
+        @assert in_dim >= 1 "in_dim (node state width) must be ≥ 1"
+        @assert time_dim >= 2 "time_dim must be ≥ 2"
+        return new(num_layers, in_dim, time_dim, hidden_dim, output_dim)
+    end
 end
 
 Functors.@leaf GNNConfig
 
-function GNNConfig(; num_layers, in_dim, hidden_dim, output_dim)
-    return GNNConfig(num_layers, in_dim, hidden_dim, output_dim)
-end
+GNNConfig(; num_layers, in_dim, time_dim, hidden_dim, output_dim) =
+    GNNConfig(num_layers, in_dim, time_dim, hidden_dim, output_dim)

@@ -1,6 +1,7 @@
 # src/problems/misp.jl
 #
-# Gurobi-based exact solver for the Maximum Independent Set Problem (MISP) delegating ILP formulation to NodeSelectionProblems.jl, and implements greedy decoding based on the sun-23-difusco.pdf paper[cite: 1].
+# Gurobi-based exact solver for the Maximum Independent Set Problem (MISP) delegating ILP formulation to
+# NodeSelectionProblems.jl, greedy decoding (DIFUSCO §3.5), and the degree baseline heatmap.
 
 using Graphs
 using JuMP
@@ -11,9 +12,10 @@ export MISPSolver
 """
     MISPSolver <: ProblemSolver
 
-A solver that solves the Maximum Independent Set Problem with the usage of Gurobi.
-Delegates the actual ILP formulation to `NodeSelectionProblems.ILP!` (via `MIS`),
-avoiding duplication of the MIS constraint/objective logic already defined there.
+A solver that exactly solves the Maximum Independent Set Problem using Gurobi, delegating the ILP formulation to NodeSelectionProblems.jl.
+
+Fields:
+    - 'time_limit': The maximum time limit allowed for the Gurobi solver.
 """
 struct MISPSolver <: ProblemSolver
     time_limit::Float64
@@ -24,17 +26,15 @@ MISPSolver(; time_limit::Float64=0.5) = MISPSolver(time_limit)
 """
     (solver::MISPSolver)(g::Graphs.SimpleGraph)
 
-Solves MISP for `g` via Gurobi. Delegates ILP formulation to `ILP!`/`NSPInstance{MIS}`, and session
-management/retry to `with_gurobi_retry` (see `gurobi_session.jl`) — this function only describes how
-to build and read out a MISP solve; it knows nothing about sessions or retries.
+Solves the Maximum Independent Set Problem for the given graph using Gurobi, handling session retries and failure states safely.
 
 Parameters:
+    - 'solver': The MISPSolver instance.
     - 'g': The graph instance to solve MISP for.
 """
 function (solver::MISPSolver)(g::Graphs.SimpleGraph)
     n = nv(g)
     x_0 = zeros(Float32, 1, n)
-    gap = NaN
 
     result = with_gurobi_retry() do env
         inst = NSPInstance(MIS(0), g, n, ne(g), Ref{Union{Nothing, JuMP.Model}}(nothing), (;))
@@ -42,13 +42,13 @@ function (solver::MISPSolver)(g::Graphs.SimpleGraph)
              env=env, threads=GRB_THREADS[])
     end
 
-    if !isnothing(result)
-        sol, status, rel_gap, solve_time = result
-        for i in 1:sol.sel
-            x_0[1, sol.x[i]] = 1.0f0
-        end
-        gap = Float64(rel_gap)
+    isnothing(result) && error("MISPSolver: Gurobi failed twice for a graph with $(nv(g)) nodes — refusing to emit an empty label.")
+
+    sol, status, rel_gap, solve_time = result
+    for i in 1:sol.sel
+        x_0[1, sol.x[i]] = 1.0f0
     end
+    gap = Float64(rel_gap)
 
     return x_0, gap
 end
@@ -56,14 +56,11 @@ end
 """
     decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
 
-Greedy decoding strategy for MISP, as described in Section 3.5 of the
-DIFUSCO paper: nodes are visited in descending order of predicted
-confidence `heatmap[i]`, and greedily added to the independent set whenever
-none of their neighbors are already selected.
+Applies a greedy decoding strategy by visiting nodes in descending order of predicted confidence and adding them to the independent set if no neighbors are already selected.
 
 Parameters:
     - 'g': The graph representing the problem instance.
-    - 'heatmap': The per-node model confidence scores a_i ∈ [0,1].
+    - 'heatmap': A vector of per-node model confidence scores.
 """
 function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
     num_nodes = g.num_nodes
@@ -96,9 +93,23 @@ function decode_heatmap(::MISPSolver, g::GNNGraph, heatmap::AbstractVector)
 end
 
 """
+    degree_baseline_heatmap(::MISPSolver, g::GNNGraph)
+
+Generates a baseline heatmap using the inverse node degrees, prompting the greedy decoder to visit nodes in ascending static degree order.
+
+Parameters:
+    - 'g': The graph structure.
+"""
+degree_baseline_heatmap(::MISPSolver, g::GNNGraph) = 1f0 ./ (1f0 .+ Float32.(degree(g)))
+
+"""
     evaluate(::MISPSolver, g::GNNGraph, mask::AbstractVector)
 
-MISP objective: cardinality of the selected (independent) set, i.e. Σᵢ maskᵢ.
+Evaluates the Maximum Independent Set objective value by calculating the cardinality of the selected node set.
+
+Parameters:
+    - 'g': The graph structure.
+    - 'mask': A binary vector indicating the selected nodes.
 """
 function evaluate(::MISPSolver, g::GNNGraph, mask::AbstractVector)
     return Float64(sum(mask))

@@ -1,7 +1,8 @@
 # src/diffusion/scheduler/atss.jl
 #
-# Implements the Adaptive Time-Step Scheduling (ATSS) strategy from the EFLOCO paper,
-# dynamically allocating fine-grained integration steps based on state variations.
+# Implements the Adaptive Time-Step Scheduling (ATSS) strategy from the EFLOCO paper (Eq. 12–14,
+# Algorithm 1). Used for INFERENCE spacing only; training time is sampled uniformly (the training
+# density ρ(t) of Eq. 15 is intentionally not used, see project decisions).
 
 using LinearAlgebra: norm
 using Functors
@@ -9,20 +10,19 @@ using Functors
 export ATSSScheduler
 
 """
-    ATSSScheduler{T} <: Scheduler{T}
+    ATSSScheduler{T} <: TimeSchedule{T}
 
-Adaptive Time-Step Scheduling (ATSS) strategy.
-Implements a non-uniform time-step scheduler that allocates finer resolution to segments of the flow matching probability path with greater state variation. Corresponds to Algorithm 1 in the EFLOCO paper.
+Implements the Adaptive Time-Step Scheduling (ATSS) strategy (Algorithm 1 of the EFLOCO paper).
 
 Fields:
-    - 'total_steps': The total number of fine-grained steps used to evaluate the discrete trajectory for integration error.
-    - 'inference_steps': The target number of adaptive steps T to sample during inference.
-    - 'steps': The generated adaptive time-step sequence.
+    - 'total_steps': Resolution of the fine grid used to evaluate the trajectory.
+    - 'inference_steps': The number of adaptive inference steps.
+    - 'steps': The adaptive time-step sequence.
     - 'κ': The interpolation function.
     - 'κ̇': The derivative of the interpolation function.
-    - 'atss_p': The exponent p controlling the path weight.
+    - 'atss_p': The exponent p of the path weight.
 """
-struct ATSSScheduler{T} <: Scheduler{T}
+struct ATSSScheduler{T} <: TimeSchedule{T}
     total_steps::Int
     inference_steps::Int
     steps::Vector{T}
@@ -36,19 +36,22 @@ Functors.@leaf ATSSScheduler
 """
     _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32, fine_grid::Vector{Float32}, x_traj::Vector{Matrix{Float32}})
 
-Solves the discrete surrogate integration error objective to find the optimal log-interpolation ratios.
+Solves the discrete surrogate integration error objective by coordinate descent over the fine grid to determine the optimal adaptive timesteps.
 
 Parameters:
-    - 'T': The target number of adaptive inference steps.
+    - 'T': The number of adaptive inference steps.
     - 'κ': The interpolation function.
-    - 'atss_p': The hyperparameter p for the path weight.
-    - 'fine_grid': The fine-grained continuous time grid used for evaluating the trajectory.
-    - 'x_traj': The sequence of state matrices sampled along the fine grid.
+    - 'atss_p': The exponent p of the path weight.
+    - 'fine_grid': The fine resolution time grid.
+    - 'x_traj': The trajectory of states evaluated on the fine grid.
 """
 function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
-                                  fine_grid::Vector{Float32}, x_traj::Vector{Matrix{Float32}})
+                                 fine_grid::Vector{Float32}, x_traj::Vector{Matrix{Float32}})
 
-    lookup_x(t::Float32) = x_traj[argmin(abs.(fine_grid .- t))]
+    S = length(fine_grid) - 1
+    # R34: every evaluated t is a grid point (candidates and the endpoints 0, 1), so index directly
+    # instead of an allocating argmin scan. Results are identical to the previous nearest-point lookup.
+    lookup_x(t::Float32) = x_traj[round(Int, t * S) + 1]
 
     function cost_and_lambda(t_interior::Vector{Float32})
         t_full = vcat(0f0, t_interior, 1f0)
@@ -56,16 +59,16 @@ function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
         λ_interior = Vector{Float32}(undef, T - 1)
         for i in 1:T
             t_i, t_im1 = t_full[i + 1], t_full[i]
-            Δ_i = norm(vec(lookup_x(t_i)) .- vec(lookup_x(t_im1)))
+            Δ_i = norm(vec(lookup_x(t_i)) .- vec(lookup_x(t_im1)))   # Eq. 13
             α_ti = κ(t_i)
             σ_ti = max(1f0 - κ(t_i), 1f-6)
             ε̃_i = σ_ti^atss_p / max(α_ti, 1f-6)
-            λ_i = log(max(α_ti, 1f-6) / σ_ti)
-            total += ε̃_i * exp(λ_i) * Δ_i
+            λ_i = log(max(α_ti, 1f-6) / σ_ti)                        # Eq. 12
+            total += ε̃_i * exp(λ_i) * Δ_i                            # Eq. 14
             if i <= T - 1
                 λ_interior[i] = λ_i
             end
-        end    
+        end
         return total, λ_interior
     end
 
@@ -79,12 +82,12 @@ function _minimize_atss_schedule(T::Int, κ::Function, atss_p::Float32,
             trial = copy(best_t_interior)
             trial[j] = c
             sort!(trial)
-            
-            # Constraint: Enforce strict monotonicity to prevent identical timesteps. Does not correspond to the paper, however tests showcased that sometimes duplicate timesteps resulted (especially for the INT version) which should not happen in my opinion.
+
+            # Enforce strict monotonicity to prevent identical timesteps (not in the paper).
             if length(unique(trial)) < length(trial)
                 continue
             end
-            
+
             c_cost, c_λ = cost_and_lambda(trial)
             if c_cost < best_cost
                 best_cost, best_λ, best_t_interior = c_cost, c_λ, trial
@@ -98,11 +101,14 @@ end
 """
     _lambda_inverse(κ::Function, λ::Float32; lo::Float32=0f0, hi::Float32=1f0, tol::Float32=1f-6)
 
-Inverts the log-interpolation ratio to recover the continuous time value via bisection.
+Inverts the log-interpolation ratio using bisection to recover the corresponding time step.
 
 Parameters:
     - 'κ': The interpolation function.
-    - 'λ': The target log-interpolation ratio.
+    - 'λ': The log-interpolation ratio.
+    - 'lo': Lower bound for the bisection search.
+    - 'hi': Upper bound for the bisection search.
+    - 'tol': Tolerance for the bisection convergence.
 """
 function _lambda_inverse(κ::Function, λ::Float32; lo::Float32=0f0, hi::Float32=1f0, tol::Float32=1f-6)
     f(t) = log(max(κ(t), 1f-6) / max(1f0 - κ(t), 1f-6))
@@ -120,15 +126,15 @@ end
 """
     _atss_schedule(generator::GraphGenerator, solver::ProblemSolver, T::Int, κ::Function, atss_p::Float32, total_steps::Int)
 
-Executes the Adaptive Time-Step Scheduling (ATSS) algorithm to generate the inference time steps.
+Executes the ATSS algorithm by sampling a problem instance, evaluating a coupled trajectory on a fine grid, and minimizing the integration error to find adaptive timesteps.
 
 Parameters:
-    - 'generator': The graph generator to sample a source instance.
-    - 'solver': The exact or heuristic solver to provide the target ground-truth solution.
-    - 'T': The desired number of adaptive inference steps.
+    - 'generator': The graph generator used to sample an instance.
+    - 'solver': The solver used to find the target solution.
+    - 'T': The number of adaptive inference steps.
     - 'κ': The interpolation function.
-    - 'atss_p': The path weight exponent.
-    - 'total_steps': The resolution of the fine-grained trajectory used for cost evaluation.
+    - 'atss_p': The exponent p of the path weight.
+    - 'total_steps': Resolution of the fine grid.
 """
 function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
                          T::Int, κ::Function, atss_p::Float32,
@@ -136,13 +142,13 @@ function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
 
     @assert T < total_steps "ATSSScheduler: inference_steps ($T) must be < total_steps ($total_steps) for adaptive schedule construction."
     @assert T >= 1 "ATSSScheduler: inference_steps ($T) must be >= 1."
-    
+
     t_grid = Vector{Float32}(undef, total_steps + 1)   # line 1 (fine substrate, resolution total_steps)
-    t_grid[1] = 0f0                          # line 1: t_0 = 0
-    t_grid[total_steps + 1] = 1f0            # line 1: t_T = 1  (T here = total_steps, the fine grid's own endpoint)
+    t_grid[1] = 0f0                                    # line 1: t_0 = 0
+    t_grid[total_steps + 1] = 1f0                      # line 1: t_S = 1
 
     for i in 1:(total_steps - 1)             # line 2
-        t_grid[i + 1] = Float32(i) / Float32(total_steps)   # line 3: t_i ← i/T
+        t_grid[i + 1] = Float32(i) / Float32(total_steps)   # line 3: t_i ← i/S
     end                                       # line 4
 
     g   = generator()
@@ -163,29 +169,33 @@ function _atss_schedule(generator::GraphGenerator, solver::ProblemSolver,
         newly_commit = (.!committed) .& (rand(Float32, 1, n) .< p_commit)
         committed  .|= newly_commit
 
-        x_traj[i + 1] = ifelse.(committed, x_1, x_traj[1])   # B: reuse x_0, don't redraw
+        x_traj[i + 1] = ifelse.(committed, x_1, x_traj[1])   # coupled: uncommitted entries keep x_0
     end
 
     λ_interior = _minimize_atss_schedule(T, κ, atss_p, t_grid, x_traj) # line 10
 
     t_interior = Vector{Float32}(undef, T - 1)
-    for i in 1:(T - 1)                                    # line 11
+    for i in 1:(T - 1)                                        # line 11
         t_interior[i] = _lambda_inverse(κ, λ_interior[i])  # line 12
-    end                                                    # line 13
+    end                                                        # line 13
 
     return vcat(0f0, t_interior, 1f0)   # line 14: {t_0, t_1, ..., t_T}
 end
 
 """
-    ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver, total_steps::Int, inference_steps::Int, κ::Function, κ̇::Function; atss_p::Float32=1.0f0) where VT
+    ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver, total_steps::Int, inference_steps::Int, κ::Function, κ̇::Function; atss_p::Float32=0.5f0) where VT
 
-Constructs an ATSSScheduler.
+Constructs an ATSSScheduler by fitting a schedule in Float32 and converting it to the requested type (Int or Float32).
 
-# B6 fix (see conversation history / project notes)
-Always builds the `Float32` schedule from `_atss_schedule` first, then — if `VT === Int` — delegates
-to `ATSSScheduler(Int, s_float)` for the Int conversion, instead of separately rounding here. This
-avoids having two independent copies of the float→Int rounding/duplicate-repair logic that could
-drift out of sync; `ATSSScheduler(Int, s::ATSSScheduler{Float32})` is the single place that does it.
+Parameters:
+    - 'VT': The target schedule type (Int or Float32).
+    - 'generator': The graph generator used to sample an instance.
+    - 'solver': The solver used to find the target solution.
+    - 'total_steps': Resolution of the fine grid.
+    - 'inference_steps': Number of adaptive inference steps.
+    - 'κ': The interpolation function.
+    - 'κ̇': The derivative of the interpolation function.
+    - 'atss_p': The exponent p of the path weight.
 """
 function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSolver,
                         total_steps::Int, inference_steps::Int,
@@ -193,7 +203,7 @@ function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSol
                         atss_p::Float32=0.5f0) where VT
 
     if !(VT === Int || VT === Float32)
-        error("ATSSScheduler only supports Scheduler{Int} or Scheduler{Float32}; got $VT")
+        error("ATSSScheduler only supports TimeSchedule{Int} or TimeSchedule{Float32}; got $VT")
     end
 
     steps_raw = _atss_schedule(generator, solver, inference_steps, κ, atss_p, total_steps)
@@ -203,9 +213,10 @@ function ATSSScheduler(::Type{VT}, generator::GraphGenerator, solver::ProblemSol
     return VT === Int ? ATSSScheduler(Int, s_float) : s_float
 end
 
+# Same default p as the typed constructor (previously 1.0 here vs 0.5 there).
 ATSSScheduler(generator::GraphGenerator, solver::ProblemSolver,
               total_steps::Int, inference_steps::Int,
-              κ::Function, κ̇::Function; atss_p::Float32=1.0f0) =
+              κ::Function, κ̇::Function; atss_p::Float32=0.5f0) =
     ATSSScheduler(Float32, generator, solver, total_steps, inference_steps, κ, κ̇; atss_p=atss_p)
 
 ATSSScheduler(::Type{VT}, s::ATSSScheduler{VT}) where {VT} = s
@@ -213,44 +224,35 @@ ATSSScheduler(::Type{VT}, s::ATSSScheduler{VT}) where {VT} = s
 """
     ATSSScheduler(::Type{Int}, s::ATSSScheduler{Float32})
 
-Converts a Float32 ATSS schedule to Int by scaling and rounding, then repairing any duplicate
-integers the rounding introduced (B6 fix — see conversation history / project notes).
-`_minimize_atss_schedule`'s own float-space search already guards against duplicates there, but
-nothing previously guarded this separate step: two close-but-distinct τ values can round to the
-same integer, silently reintroducing duplicates the float search avoided. This is the single place
-in the file that performs this conversion — the outer generator/solver-driven constructor above
-delegates here rather than duplicating the rounding logic.
+Converts a fitted Float32 schedule (flow time = generation progress) into integer diffusion times, ensuring strictly increasing steps and repairing duplicates.
+
+Parameters:
+    - 's': The Float32 ATSSScheduler to convert.
 """
 function ATSSScheduler(::Type{Int}, s::ATSSScheduler{Float32})
-    @assert length(s.steps) <= s.total_steps + 1 "ATSSScheduler: inference_steps+1 ($(length(s.steps))) exceeds available integer resolution (total_steps+1 = $(s.total_steps + 1)); cannot produce distinct integer steps."
+    @assert length(s.steps) <= s.total_steps + 1 "ATSSScheduler: inference_steps+1 ($(length(s.steps))) exceeds available integer resolution (total_steps+1 =$(s.total_steps + 1)); cannot produce distinct integer steps."
 
-    steps = round.(Int, clamp.(s.steps .* s.total_steps, 0, s.total_steps))
+    T = s.total_steps
+    steps = sort(round.(Int, clamp.((1f0 .- s.steps) .* T, 0, T)))              # progress → diffusion time
     steps = accumulate((prev, cur) -> max(prev + 1, cur), steps)              # forward pass, enforce strictly increasing
-    steps[end] = min(steps[end], s.total_steps)                              # re-clamp in case the forward pass overshot
-    steps = reverse(accumulate((prev, cur) -> min(prev - 1, cur), reverse(steps)))  # backward pass, propagate that clamp (no-op if nothing overshot)
+    steps[end] = min(steps[end], T)                                          # re-clamp in case the forward pass overshot
+    steps = reverse(accumulate((prev, cur) -> min(prev - 1, cur), reverse(steps)))  # backward pass, propagate that clamp
 
-    return ATSSScheduler{Int}(s.total_steps, s.inference_steps, steps, s.κ, s.κ̇, s.atss_p)
+    return ATSSScheduler{Int}(T, s.inference_steps, steps, s.κ, s.κ̇, s.atss_p)
 end
 
+"""
+    ATSSScheduler(::Type{Float32}, s::ATSSScheduler{Int})
+
+Converts integer diffusion times back into a Float32 schedule representing the generation progress.
+
+Parameters:
+    - 's': The Int ATSSScheduler to convert.
+"""
 function ATSSScheduler(::Type{Float32}, s::ATSSScheduler{Int})
-    steps = Float32.(s.steps) ./ Float32(s.total_steps)
+    steps = sort(1f0 .- Float32.(s.steps) ./ Float32(s.total_steps))
     return ATSSScheduler{Float32}(s.total_steps, s.inference_steps, steps, s.κ, s.κ̇, s.atss_p)
 end
 
-Base.convert(::Type{Scheduler{VT}}, s::ATSSScheduler) where {VT} = ATSSScheduler(VT, s)
+Base.convert(::Type{TimeSchedule{VT}}, s::ATSSScheduler) where {VT} = ATSSScheduler(VT, s)
 Base.convert(::Type{ATSSScheduler{VT}}, s::ATSSScheduler) where {VT} = ATSSScheduler(VT, s)
-
-
-#GR TODO Was sagen Sie zu folgendem Punkt, den Claude hier anmerkt?
-# ATSS scheduling objective is degenerate and pushes all interior steps toward t = 1.**
-# `atss.jl:62-64`: `ε̃_i·exp(λ_i)·Δ_i` simplifies to `σ(t_i)^(p−1)·Δ_i`, identically `Δ_i` for the default
-# `atss_p = 1`. Because `_atss_schedule` (`atss.jl:160-164`) redraws fresh noise for every uncommitted
-# entry at every fine step, `E‖x_{t_i} − x_{t_{i−1}}‖` depends only on the left endpoint, not on the gap,
-# so the cost is monotone decreasing in every interior t_j and coordinate descent piles them up near 1.
-# The author's own comment in `discrete_flow_matching.jl:52` ("ATSS pushes steps towards 1, which results
-# in extreme values") is the symptom, and the `±100` clamp on the velocity scale is the band-aid. After
-# Int conversion, clustered steps round to duplicates; `posterior_prob` with `t == s` is an exact
-# identity, so ATSS + Bernoulli runs perform far fewer real denoising steps than `inference_steps`. The
-# schedule is also fitted from one graph, one solver call and one trajectory (`atss.jl:145-146`), and
-# `_lambda_inverse` merely inverts a λ that was computed from the chosen t (identity plus bisection error).
-# The surrogate needs a gap-dependent weight (Δλ or ‖Δx‖/Δt) and a coupled trajectory.

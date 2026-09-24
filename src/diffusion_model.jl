@@ -4,12 +4,18 @@
 # Manages the primary training loop, batching, loss computation, and inference generation.
 
 using ChainRulesCore: unthunk, AbstractThunk
-export DiffusionModel, infer, build_model_input
+using NNlib
+using Random
+export DiffusionModel, infer, compute_loss, compute_loss_and_gradients
 
 """
     DiffusionModel{G<:GNN, M<:Diffusion}
-    
-Represents a Diffusionmodel consisting of a gnn and a generative method (e.g. Bernoulli Denoising Diffusion or Flow Matching). 
+
+A diffusion model combining a Graph Neural Network (GNN) and a generative method.
+
+Fields:
+    - 'gnn': The GNN backbone model.
+    - 'method': The generative diffusion or flow matching method.
 """
 struct DiffusionModel{G<:GNN, M<:Diffusion}
     gnn::G
@@ -18,89 +24,244 @@ end
 
 Flux.@layer DiffusionModel
 
-_embed_timesteps(t_emb, ::Nothing, x_t) =
-    repeat(t_emb, 1, size(x_t, 2))
-
-_embed_timesteps(t_emb, node_indices::AbstractVector, x_t) =
-    t_emb[:, node_indices]
-
 """
-    build_model_input(x::AbstractArray, timesteps::AbstractVector{<:Integer}, time_dim::Int, gi)
+    _nodewise(v::AbstractVector, gi, N::Int)
 
-Single canonical assembly of a GNN forward-pass input: computes the
-sinusoidal timestep embedding, broadcasts it from one-per-graph to
-one-per-node via `gi`, and concatenates it in front of the state,
-i.e. `x_input = [t_emb; x]`.
-
-This is the single owner of the "pack timestep embedding + state into one
-input matrix" contract (B10) — `AGNN`'s forward pass is the corresponding
-unpack side (`t_emb = x_input[1:end-fd, :]; x_t = x_input[end-fd+1:end, :]`),
-so the two must stay in sync. Previously this packing logic was duplicated
-three times: here, inline in `compute_loss_and_gradients`, and as
-`_build_model_input` in `discrete_flow_matching.jl`; all three now call this
-one function.
+Broadcasts a per-graph vector to one entry per node using the graph indicator, or repeats it for a single unbatched graph.
 
 Parameters:
-    - 'x': the current node-state matrix, shape (x_dim, N).
-    - 'timesteps': per-graph (length == num_graphs) or already per-node
-      (length == N) integer timesteps.
-    - 'time_dim': width of the sinusoidal timestep embedding.
-    - 'gi': `g.graph_indicator`, mapping each node to its graph id, or
-      `nothing` for a single unbatched graph.
+    - 'v': A per-graph vector to broadcast.
+    - 'gi': The graph indicator mapping nodes to graphs (or nothing for unbatched).
+    - 'N': The number of nodes or repetitions for unbatched graphs.
 """
-function build_model_input(x::AbstractArray, timesteps::AbstractVector{<:Integer}, time_dim::Int, gi)
-    t_emb = get_timestep_embedding(timesteps, time_dim)
-    t_emb_nodes = _embed_timesteps(t_emb, gi, x)
-    return vcat(t_emb_nodes, x)
+function _nodewise(v::AbstractVector, ::Nothing, N::Int)
+    @assert length(v) == 1 "unbatched graph expects exactly one per-graph value, got $(length(v))"
+    return repeat(v, N)
+end
+_nodewise(v::AbstractVector, gi::AbstractVector, N::Int) = v[gi]
+
+"""
+    _node_row(v::AbstractVector, gi, N::Int)
+
+Reshapes a broadcasted per-graph vector into a row matrix to broadcast against node-state matrices.
+
+Parameters:
+    - 'v': A per-graph vector to broadcast.
+    - 'gi': The graph indicator mapping nodes to graphs.
+    - 'N': The total number of nodes.
+"""
+_node_row(v::AbstractVector, gi, N::Int) = reshape(_nodewise(v, gi, N), 1, :)
+
+"""
+    _device_anchor(g::GNNGraph)
+
+Retrieves an array from the graph that lives on the target device, used as a template for allocating new arrays.
+
+Parameters:
+    - 'g': The input graph.
+"""
+_device_anchor(g::GNNGraph) = edge_index(g)[1]
+
+"""
+    _random_binary(g::GNNGraph, shape::Tuple)
+
+Generates a uniform binary source state directly on the same device as the input graph.
+
+Parameters:
+    - 'g': The reference graph determining the target device.
+    - 'shape': The dimensions of the generated binary state.
+"""
+_random_binary(g::GNNGraph, shape::Tuple) =
+    Float32.(rand!(similar(_device_anchor(g), Float32, shape)) .> 0.5f0)
+
+"""
+    _arange_like(x::AbstractArray, n::Int)
+
+Creates a sequential array directly on the device of the reference array, preventing host-to-device copy overhead.
+
+Parameters:
+    - 'x': The reference array determining the target device.
+    - 'n': The number of sequential elements to generate.
+"""
+_arange_like(x::AbstractArray, n::Int) = cumsum(fill!(similar(x, Float32, n), 1f0)) .- 1f0
+
+"""
+    get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
+
+Generates a sinusoidal timestep embedding matrix directly on the target device.
+
+Parameters:
+    - 'timesteps': A vector of timesteps to embed.
+    - 'embedding_dim': The dimensionality of the resulting embeddings.
+    - 'max_period': The maximum period for the sinusoidal frequencies.
+"""
+function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
+    half = div(embedding_dim, 2)
+    t = reshape(Float32.(timesteps), 1, :)                                          # (1, n)
+    freqs = exp.(-log(Float32(max_period)) .* _arange_like(t, half) ./ Float32(half))  # (half,)
+    args = freqs .* t                                                               # (half, n)
+    emb = vcat(cos.(args), sin.(args))
+    if isodd(embedding_dim)
+        emb = vcat(emb, fill!(similar(emb, 1, size(emb, 2)), 0f0))
+    end
+    return emb
 end
 
 """
-    (model::DiffusionModel)(x::AbstractArray, t::AbstractVector{Int}, g::GNNGraph)
+    _time_embedding(gnn::GNN, timesteps::AbstractVector{<:Integer}, g::GNNGraph)
 
-Defines a forward pass (callable for Flux) of the network.
+Generates per-graph timestep embeddings based on the GNN's configuration.
 
 Parameters:
-    - 'x_t': The current state of the solution.
-    - 't': The per-graph diffusion/flow timesteps.
-    - 'g': A graph(batch).
+    - 'gnn': The Graph Neural Network containing the configuration.
+    - 'timesteps': A vector providing one timestep per graph.
+    - 'g': The batch of graphs.
 """
-function (model::DiffusionModel)(x_t::AbstractArray, t::AbstractVector{<:Integer}, g::GNNGraph)
-    x_dim    = size(x_t, 1)
-    time_dim = model.gnn.config.in_dim - x_dim
-
-    x_input = build_model_input(x_t, t, time_dim, g.graph_indicator)
-    return model.gnn(g, x_input)
+function _time_embedding(gnn::GNN, timesteps::AbstractVector{<:Integer}, g::GNNGraph)
+    @assert length(timesteps) == g.num_graphs "expected one timestep per graph ($(g.num_graphs)), got$(length(timesteps))"
+    return get_timestep_embedding(timesteps, gnn.config.time_dim)
 end
 
 """
-    train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5, val_loader=nothing)
+    (model::DiffusionModel)(x_t::AbstractMatrix, t::AbstractVector{<:Integer}, g::GNNGraph)
 
-Main training loop for a diffusion model.
+Executes the forward pass of the diffusion model to predict logits for the target state.
 
 Parameters:
-    - 'model': The model to train.
-    - 'optim': The optimizer.
-    - 'data_loader': The dataloader which loads training data lazily.
-    - 'epochs': The epochs to train for.
-    - 'val_loader': Optional `Flux.DataLoader` over a *fixed*, held-out
-      validation set (same `(GNNGraph, name)` shape as `data_loader`). When
-      given, validation loss is computed once per epoch with no gradient
-      update, so overfitting becomes observable (B7). When `nothing`
-      (default), training behaves exactly as before.
+    - 'model': The DiffusionModel instance.
+    - 'x_t': The node state matrix at the current timestep.
+    - 't': A vector of per-graph timesteps.
+    - 'g': The batch of graphs.
+"""
+function (model::DiffusionModel)(x_t::AbstractMatrix, t::AbstractVector{<:Integer}, g::GNNGraph)
+    return model.gnn(g, x_t, _time_embedding(model.gnn, t, g))
+end
 
-Returns `(loss_history, val_loss_history)`; `val_loss_history` is empty when
-`val_loader === nothing`. NOTE: this is a breaking change from the previous
-single-`Vector` return value — update any external caller accordingly.
+"""
+    _node_bce(logits::AbstractArray, y::AbstractArray, gi, num_graphs::Int, symmetric::Bool)
+
+Calculates the mean binary cross-entropy over all nodes, optionally applying flip-invariant symmetry per graph.
+
+Parameters:
+    - 'logits': The predicted logits.
+    - 'y': The target binary labels.
+    - 'gi': The graph indicator mapping nodes to graphs.
+    - 'num_graphs': The total number of graphs in the batch.
+    - 'symmetric': Boolean flag to evaluate loss up to complement symmetry.
+"""
+function _node_bce(logits::AbstractArray, y::AbstractArray, gi, num_graphs::Int, symmetric::Bool)
+    symmetric || return Flux.logitbinarycrossentropy(logits, y)
+    l_a = Flux.logitbinarycrossentropy(logits, y; agg=identity)
+    l_b = Flux.logitbinarycrossentropy(logits, 1f0 .- y; agg=identity)
+    if isnothing(gi)
+        return min(sum(l_a), sum(l_b)) / length(y)
+    end
+    s_a = NNlib.scatter(+, vec(l_a), gi; dstsize=(num_graphs,))
+    s_b = NNlib.scatter(+, vec(l_b), gi; dstsize=(num_graphs,))
+    return sum(min.(s_a, s_b)) / length(y)
+end
+
+"""
+    _prepare_loss
+
+Method-specific interface to compute all non-differentiated components (embeddings, schedules, targets) prior to loss calculation.
+"""
+function _prepare_loss end
+
+"""
+    _loss_terms
+
+Method-specific interface to compute the differentiated components of the loss.
+"""
+function _loss_terms end
+
+"""
+    compute_loss(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_target::AbstractArray, aux=nothing; symmetric::Bool=false)
+
+Performs a forward-only loss computation without tracking gradients, typically used for validation.
+
+Parameters:
+    - 'gnn': The GNN backbone model.
+    - 'method': The generative diffusion method.
+    - 'x_t': The node state matrix at the current timestep.
+    - 'timesteps': A vector of per-graph timesteps.
+    - 'batch': The batch of graphs.
+    - 'x_target': The target solution state.
+    - 'aux': Optional method-specific auxiliary data.
+    - 'symmetric': Boolean flag to apply flip-invariant loss.
+"""
+function compute_loss(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector,
+                      batch::GNNGraph, x_target::AbstractArray, aux=nothing; symmetric::Bool=false)
+    prep = _prepare_loss(gnn, method, x_t, timesteps, batch, x_target, aux, symmetric)
+    return _loss_terms(gnn, method, prep)
+end
+
+"""
+    _mat(g)
+
+Forces a single materialization of thunks to prevent unnecessary evaluations by Zygote, returning numeric arrays unchanged.
+
+Parameters:
+    - 'g': The object or collection of objects to materialize.
+"""
+_mat(g::AbstractThunk)    = unthunk(g)
+_mat(g::NamedTuple)       = map(_mat, g)
+_mat(g::Tuple)            = map(_mat, g)
+_mat(g::AbstractVector)   = eltype(g) <: Number ? g : map(_mat, g)
+_mat(g)                   = g
+
+"""
+    compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_target::AbstractArray, aux=nothing; symmetric::Bool=false)
+
+Performs a combined forward and backward pass, returning the loss components and computed gradients.
+
+Parameters:
+    - 'gnn': The GNN backbone model.
+    - 'method': The generative diffusion method.
+    - 'x_t': The state at time t.
+    - 'timesteps': A vector of per-graph timesteps.
+    - 'batch': The batch of graphs.
+    - 'x_target': The target solution state.
+    - 'aux': Optional method-specific auxiliary data.
+    - 'symmetric': Boolean flag to apply flip-invariant loss.
+"""
+function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector,
+                                    batch::GNNGraph, x_target::AbstractArray, aux=nothing; symmetric::Bool=false)
+    prep = _prepare_loss(gnn, method, x_t, timesteps, batch, x_target, aux, symmetric)
+    loss_parts, grads = Flux.withgradient(gnn) do gnn_inner # IMPORTANT TO BOX LIKE THIS FOR ZYGOTE!
+        _loss_terms(gnn_inner, method, prep)                # NamedTuple: gradient of the first field (`loss`)
+    end
+    return loss_parts, (_mat(grads[1]),)
+end
+
+_format_parts(parts::NamedTuple) =
+    join(["$(k)=$(round(Float64(v), digits=4))" for (k, v) in pairs(parts) if k != :loss], " | ")
+
+_sync_device() = (CUDA.functional() && CUDA.synchronize(); nothing)
+
+"""
+    train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5, val_loader::Union{Nothing,Flux.DataLoader}=nothing, symmetric_labels::Bool=false)
+
+Executes the main training loop for a diffusion model, tracking loss history over batches and epochs.
+
+Parameters:
+    - 'model': The diffusion model to train.
+    - 'optim': The optimizer state.
+    - 'data_loader': The dataloader providing training data batches.
+    - 'epochs': The total number of epochs to train for.
+    - 'val_loader': An optional dataloader for held-out validation.
+    - 'symmetric_labels': Boolean flag to apply flip-invariant loss for complement-symmetric labels.
 """
 function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
                                  epochs::Int=5,
-                                 val_loader::Union{Nothing,Flux.DataLoader}=nothing)
+                                 val_loader::Union{Nothing,Flux.DataLoader}=nothing,
+                                 symmetric_labels::Bool=false)
     loss_history = Float32[]
     val_loss_history = Float32[]
     batch_loss_history = Float32[]
     val_loss_batches = Int[]
     global_batch_num = 0
-    @info "Starting training"
+    @info "Starting training (symmetric_labels=$symmetric_labels)"
 
     for epoch in 1:epochs
         if epoch > 1 && data_loader.data isa RuntimeDataset
@@ -120,61 +281,88 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
         for (g_batch, names_batch) in prefetch_channel
 
             batch_size = length(names_batch)
+            loss_parts = nothing
             batch_time = @elapsed begin
                 g_batch = g_batch |> Flux.gpu
                 x_start = g_batch.ndata.x
-                x_t, timesteps, x_0, commit_mask = corrupt_batch(model.method, x_start, g_batch)
+                x_t, timesteps, x_target, aux = corrupt_batch(model.method, x_start, g_batch)
 
-                loss, grads = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0, commit_mask)
+                loss_parts, grads = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps,
+                                                               g_batch, x_target, aux; symmetric=symmetric_labels)
 
                 Flux.update!(optim, model.gnn, grads[1])
+                _sync_device()   # P7: include backward/optimizer work in this batch's timing
             end
+            loss = Float32(loss_parts.loss)
 
             avg_time_per_instance = batch_time / batch_size
             num_batches += 1
             global_batch_num += 1
             total_instances += batch_size
 
-            @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | Loss: $(round(loss, digits=4))"
+            parts_str = _format_parts(loss_parts)
+            @info "Batch $num_batches [$total_instances instances total] \vert{} Total:$(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s \vert{} Loss:$(round(loss, digits=4))" * (isempty(parts_str) ? "" : " | " * parts_str)
 
             epoch_loss += loss
-            push!(batch_loss_history, Float32(loss))
-
+            push!(batch_loss_history, loss)
         end
 
         avg_loss = epoch_loss / max(1, num_batches)
         push!(loss_history, avg_loss)
 
         if !isnothing(val_loader)
-            val_loss = _validation_loss(model, val_loader)
+            val_loss = _validation_loss(model, val_loader; symmetric_labels=symmetric_labels)
             push!(val_loss_history, val_loss)
             push!(val_loss_batches, global_batch_num)
-            @info "Epoch $epoch | Avg Train Loss: $avg_loss | Avg Val Loss: $val_loss"
+            @info "Epoch $epoch | Avg Train Loss: $avg_loss \vert{} Avg Val Loss:$val_loss"
         else
-            @info "Epoch $epoch | Avg Loss: $avg_loss"
+            @info "Epoch $epoch \vert{} Avg Loss:$avg_loss"
         end
     end
 
     return loss_history, val_loss_history, batch_loss_history, val_loss_batches
 end
 
-"""
-    _validation_loss(model::DiffusionModel, val_loader)
+const VALIDATION_SEED = 0x5eed_7a1d
 
-Computes the average loss over a held-out validation set without updating
-weights. Reuses `compute_loss_and_gradients` (so both `BernoulliDiffusion`
-and `DiscreteFlowMatching` are supported through the same generic dispatch
-used during training) and simply discards the gradients. This costs one
-unused backward pass per validation batch — a deliberate simplicity/DRY
-trade-off against writing a third, forward-only loss path; validation sets
-are small and this only runs once per epoch.
+"""
+    _with_fixed_rng(f, seed)
+
+Executes a function using a fixed random seed for both CPU and GPU (if available), subsequently restoring the CPU RNG state to maintain reproducibility.
 
 Parameters:
-    - 'model': The model being validated.
-    - 'val_loader': A `Flux.DataLoader` over a fixed, held-out set of
-      `(GNNGraph, name)` pairs.
+    - 'f': The zero-argument function to execute.
+    - 'seed': The random seed to apply.
 """
-function _validation_loss(model::DiffusionModel, val_loader)
+function _with_fixed_rng(f, seed)
+    cpu_state = copy(Random.default_rng())
+    Random.seed!(seed)
+    CUDA.functional() && CUDA.seed!(seed)
+    try
+        return f()
+    finally
+        copy!(Random.default_rng(), cpu_state)
+        CUDA.functional() && CUDA.seed!(rand(Random.default_rng(), UInt32))
+    end
+end
+
+"""
+    _validation_loss(model::DiffusionModel, val_loader; symmetric_labels::Bool=false)
+
+Computes the average forward-only loss over a validation set using a fixed random seed for consistent evaluation.
+
+Parameters:
+    - 'model': The diffusion model to evaluate.
+    - 'val_loader': The dataloader providing validation data.
+    - 'symmetric_labels': Boolean flag to apply flip-invariant loss.
+"""
+function _validation_loss(model::DiffusionModel, val_loader; symmetric_labels::Bool=false)
+    return _with_fixed_rng(VALIDATION_SEED) do
+        _validation_loss_unseeded(model, val_loader, symmetric_labels)
+    end
+end
+
+function _validation_loss_unseeded(model::DiffusionModel, val_loader, symmetric_labels::Bool)
     Flux.testmode!(model.gnn)
     total_loss = 0.0f0
     n_batches = 0
@@ -182,9 +370,10 @@ function _validation_loss(model::DiffusionModel, val_loader)
     for (g_batch, _) in val_loader
         g_batch = g_batch |> Flux.gpu
         x_start = g_batch.ndata.x
-        x_t, timesteps, x_0, commit_mask = corrupt_batch(model.method, x_start, g_batch)
-        loss, _ = compute_loss_and_gradients(model.gnn, model.method, x_t, timesteps, g_batch, x_0, commit_mask)
-        total_loss += loss
+        x_t, timesteps, x_target, aux = corrupt_batch(model.method, x_start, g_batch)
+        parts = compute_loss(model.gnn, model.method, x_t, timesteps, g_batch, x_target, aux;
+                             symmetric=symmetric_labels)
+        total_loss += Float32(parts.loss)
         n_batches += 1
     end
 
@@ -193,83 +382,17 @@ function _validation_loss(model::DiffusionModel, val_loader)
 end
 
 """
-    infer(model::DiffusionModel, g_batch::GNNGraph)
+    infer(model::DiffusionModel, batch::GNNGraph)
 
-Single-graph(-batch) convenience entry point for inference: moves the batch
-to the GPU, samples a heatmap via `sample_heatmap`, and returns it on the
-CPU. This is the recommended public API for one-off inference (B11 — it was
-previously unexported and unused, so it read as dead code; the more
-elaborate evaluation loop in `run_automated_pipeline`, test_utils.jl, calls
-`sample_heatmap` directly only because it also needs to interleave batching,
-decoding, and result-file writing).
+Performs inference on a batch of graphs, sampling a heatmap and transferring the result back to the CPU.
 
 Parameters:
-    - 'model': The model which will be infered.
-    - 'batch': The batch of graphs which will be passed for inference.
+    - 'model': The trained diffusion model.
+    - 'batch': The batch of graphs to process.
 """
 function infer(model::DiffusionModel, batch::GNNGraph)
     g_gpu = batch |> Flux.gpu
-    shape = (1, g_gpu.num_nodes)
+    shape = (model.gnn.config.in_dim, g_gpu.num_nodes)   # M7
     heatmap_gpu = Thesis.sample_heatmap(model.method, model, shape, g_gpu)
     return heatmap_gpu |> Flux.cpu
-end
-
-"""
-Needed to ensure Zygote is not evaluating thunks unnecessarily often. It forces a one-time materialization so the result can be reused.
-"""
-_mat(g::AbstractThunk)    = unthunk(g)
-_mat(g::NamedTuple)       = map(_mat, g)
-_mat(g::Tuple)            = map(_mat, g)
-_mat(g::AbstractVector)   = map(_mat, g)
-_mat(g)                   = g
-
-"""
-    compute_loss_and_gradients
-
-Consists of one forward and one backward pass through the network. Returns the gradient and the loss for weight adjustments.
-
-Parameters:
-    -'gnn': the GNN of the model
-    -'method': the diffusion method
-    -'x_t': solution state at timestep t
-    -'timesteps': vector containing the diffusion timesteps for each graph in the batch
-    -'batch': the batch of graphs, already on the GPU
-    -'x_0': the optimal solution for loss computation
-    -'commit_mask': ignored by this generic (BernoulliDiffusion) dispatch — present only so the
-      shared training loop can call `compute_loss_and_gradients` uniformly regardless of diffusion
-      method; `DiscreteFlowMatching`'s own more-specific method (in `discrete_flow_matching.jl`)
-      actually uses it (B1 fix).
-"""
-function compute_loss_and_gradients(gnn::GNN, method::Diffusion, x_t::AbstractArray, timesteps::AbstractVector, batch::GNNGraph, x_0::AbstractArray, commit_mask=nothing)
-    x_dim = size(x_t, 1)
-    time_dim = gnn.config.in_dim - x_dim
-    x_input = build_model_input(x_t, timesteps, time_dim, batch.graph_indicator)
-
-    loss, grads = Flux.withgradient(gnn) do gnn_inner # IMPORTANT TO BOX LIKE THIS FOR ZYGOTE! Otherwise each training call the gradient will be recalculated!
-        preds = gnn_inner(batch, x_input)
-        calculate_loss(method, preds, x_0)
-    end
-    return loss, (_mat(grads[1]),)
-end
-
-"""
-    get_timestep_embedding(timesteps, embedding_dim, max_period=10000)
-
-Generates sinusoidal time embeddings.
-
-Parameters:
-    - 'timesteps': The vector of integers (T,)
-    - 'embedding_dim': The output dimension (D,)
-    - 'max_period': The maximum period used.
-"""
-function get_timestep_embedding(timesteps::AbstractVector{<:Integer}, embedding_dim::Int, max_period=10000)
-    half = div(embedding_dim, 2)
-    freqs = exp.(-log(Float32(max_period)) .* Float32.(0:half-1) ./ Float32(half)) |> Flux.gpu
-    t = Float32.(timesteps)
-    args = reshape(t, :, 1) .* reshape(freqs, 1, :)
-    emb = permutedims(hcat(cos.(args), sin.(args)))
-    if embedding_dim % 2 == 1
-        emb = vcat(emb, CUDA.zeros(Float32, 1, size(emb, 2)))
-    end
-    return emb
 end
