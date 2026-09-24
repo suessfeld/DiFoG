@@ -65,6 +65,8 @@ reference-form consistency loss, not the full EFLOCO method (no ρ(t) training d
 _method_label(m::BernoulliDiffusion) = "Bernoulli diffusion (DIFUSCO)"
 _method_label(m::DiscreteFlowMatching) =
     "DFM + consistency (reference form, lambda_cons=$(m.λ_cons)), sampler=$(m.sampler)"
+_method_label(m::RectifiedFlow) =
+    "Rectified flow (Gaussian relaxation, sigma_src=$(m.σ_src)), prediction=$(m.prediction), Euler ODE"
 
 """
     _model_eval_signal(method)
@@ -83,6 +85,15 @@ function _model_eval_signal(m::DiscreteFlowMatching)
     τs = m.scheduler.steps[1:end-1]                     # 0 → … → last step before 1
     return join(["tau=$(round(τ, digits=3)): $(round(Float64(m.κ(τ)), sigdigits=2))" for τ in τs], ", ")
 end
+# Straight path: the target weight at time τ is τ itself.
+function _model_eval_signal(m::RectifiedFlow)
+    τs = m.scheduler.steps[1:end-1]
+    return join(["tau=$(round(τ, digits=3))" for τ in τs], ", ")
+end
+
+_model_eval_signal_key(::BernoulliDiffusion)   = "alpha-bar at model evaluations"
+_model_eval_signal_key(::DiscreteFlowMatching) = "Nominal kappa at model evaluations"
+_model_eval_signal_key(::RectifiedFlow)        = "Path times at model evaluations"
 
 """
     run_automated_pipeline(; run_id, train_run_id=run_id, model, generator, solver, num_train=1000,
@@ -108,6 +119,10 @@ Parameters:
     - 'evaluate': `false` → only train/load and save the model, no test evaluation or report (R32).
     - 'result_root': Root directory for models/graphs/seeds/reports/instances.
     - 'training_seed', 'test_seed', 'validation_seed': seeds identifying each split's `<seed>.csv`.
+    - 'reflow_from': `RectifiedFlow` only. `train_run_id` of a trained (k-)RF model: its weights are loaded,
+      its ODE coupling (x₀, Z₁) is generated on the training/validation instances, and the model is
+      trained on that coupling instead of the data labels ((k+1)-RF, Reflow). `nothing` = regular training.
+    - 'reflow_ode_steps': Euler steps used to generate the Reflow coupling.
 
 Returns the report path, or `nothing` when `evaluate=false`.
 """
@@ -129,7 +144,9 @@ function run_automated_pipeline(;
     result_root::String,
     training_seed::Int,
     test_seed::Int,
-    validation_seed::Int
+    validation_seed::Int,
+    reflow_from::Union{Nothing,String} = nothing,
+    reflow_ode_steps::Int = 100
 )
     @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
     seeds_dir = joinpath(result_root, "seeds")
@@ -168,6 +185,20 @@ function run_automated_pipeline(;
         @info "Initializing Train dataset..."
         train_dataset = RuntimeDataset(num_train, generator, solver, training_seed, seeds_dir)
         train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=false, collate=true)
+
+        if !isnothing(reflow_from)
+            model.method isa RectifiedFlow || error("reflow_from is only supported for RectifiedFlow, got $(typeof(model.method))")
+            teacher_path = joinpath(models_dir, "model-$reflow_from.jld2")
+            isfile(teacher_path) || error("Reflow teacher model '$reflow_from' not found at $teacher_path — train it first.")
+            @info "Reflow: warm-starting from $teacher_path and generating its coupling ($(reflow_ode_steps) Euler steps)..."
+            DiFoG.load_model!(model, teacher_path)
+            coupling = DiFoG.generate_reflow_coupling(model, train_loader; ode_steps=reflow_ode_steps)
+            train_loader = Flux.DataLoader(coupling, batchsize=batch_size, shuffle=true, collate=true)
+            if !isnothing(val_loader)
+                val_coupling = DiFoG.generate_reflow_coupling(model, val_loader; ode_steps=reflow_ode_steps)
+                val_loader = Flux.DataLoader(val_coupling, batchsize=batch_size, shuffle=false, collate=true)
+            end
+        end
 
         optim = Flux.setup(
             Flux.Optimisers.OptimiserChain(
@@ -456,13 +487,13 @@ function run_automated_pipeline(;
             ("Inference Schedule", string(typeof(model.method.scheduler).name.name)),
             ("Inference Steps", string(model.method.scheduler.inference_steps)),
             ("Configured / effective transitions", "$(model.method.scheduler.inference_steps) / $(length(model.method.scheduler.steps) - 1)"),
-            (model.method isa DiscreteFlowMatching ? "Nominal kappa at model evaluations" : "alpha-bar at model evaluations",
-             _model_eval_signal(model.method)),
+            (_model_eval_signal_key(model.method), _model_eval_signal(model.method)),
         ]; caption="Model configuration for run $(run_id)", label="tab:model-$(label_base)")
 
         println(io, "\\subsubsection{Training Hyperparameters}")
         write_latex_kv_table(io, [
             ("Trained Model", train_run_id),
+            ("Reflow Teacher Model", isnothing(reflow_from) ? "none" : "$reflow_from ($reflow_ode_steps Euler steps)"),
             ("Loaded pretrained model", string(model_already_exists)),
             ("Epochs", string(epochs)),
             ("Batch Size", string(batch_size)),

@@ -27,6 +27,7 @@ include("./utils/plotting.jl")
 
 include("./diffusion/methods/diffusion/bernoulli_diffusion.jl")
 include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
+include("./diffusion/methods/flow_matching/rectified_flow.jl")
 
 include("./utils/data/data_utils.jl")
 include("./utils/data/runtime_dataset.jl")
