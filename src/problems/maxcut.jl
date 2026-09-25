@@ -49,17 +49,29 @@ function (solver::MaxCutSolver)(g::Graphs.SimpleGraph)
     for i in 1:sol.sel
         x_0[1, sol.x[i]] = 1.0f0
     end
-
-    degs = degree(g)
-    max_deg_node = argmax(degs)
-    
-    if x_0[1, max_deg_node] == 0.0f0
-        x_0 .= 1.0f0 .- x_0
-    end
+    canonicalize_label!(solver, x_0, g)
 
     gap = Float64(rel_gap)
 
     return x_0, gap
+end
+
+"""
+    canonicalize_label!(::MaxCutSolver, x::AbstractMatrix, g)
+
+A cut and its complement are the same solution; the canonical label puts the node of maximum degree on
+side 1 (complementing the label otherwise).
+
+Parameters:
+    - 'x': The label as a (1, n) matrix, modified in place.
+    - 'g': The graph of the instance.
+"""
+function canonicalize_label!(::MaxCutSolver, x::AbstractMatrix, g)
+    max_deg_node = argmax(degree(g))
+    if x[1, max_deg_node] == 0.0f0
+        x .= 1.0f0 .- x
+    end
+    return x
 end
 
 """

@@ -52,17 +52,22 @@ end
 
 Generates and solves graph instances from a seeded random stream, appending missing instances to a CSV file if it already exists. Ensures the RNG stream is fast-forwarded to maintain deterministic generation.
 
+The file is named `<seed>.csv`, or `<seed>_<tag>.csv` if the solver has a non-empty `dataset_tag`, so that
+several solvers can label the same graphs (same seed) in separate files. Solvers without a bound (e.g. an LNS)
+write `NaN` as gap.
+
 Parameters:
     - 'seed': The RNG seed used for deterministic generation and as the filename.
     - 'filepath': The directory where the CSV is written.
     - 'generator': The graph generator used to instantiate graphs.
-    - 'solver': The problem solver used to compute the exact solutions.
+    - 'solver': The problem solver used to compute the solutions.
     - 'num_instances': The target total number of instances the file should contain.
 """
 function create_dataset(seed::Integer, filepath::AbstractString, generator::GraphGenerator,
                         solver::ProblemSolver, num_instances::Int)
     mkpath(filepath)
-    path = joinpath(filepath, "$(seed).csv")
+    tag = dataset_tag(solver)
+    path = joinpath(filepath, isempty(tag) ? "$(seed).csv" : "$(seed)_$(tag).csv")
     rng = Random.Xoshiro(seed)
 
     existing = 0

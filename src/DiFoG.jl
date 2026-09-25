@@ -48,6 +48,7 @@ abstract type Config end
 
 include("./problems/NodeSelectionProblems.jl")
 include("./problems/maxcut.jl")
+include("./problems/lns.jl")
 
 function __init__()
     set_log_level!() # for loglevel

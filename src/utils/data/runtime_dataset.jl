@@ -3,7 +3,7 @@
 # Implements a seeded, asynchronous dataset generator that yields graph instances and their exact
 # solver solutions.
 #
-# Ensures `<filepath>/<seed>.csv` exists via `create_dataset` (creating it if needed, reusing it
+# Ensures `<filepath>/<seed>[_<tag>].csv` exists via `create_dataset` (creating it if needed, reusing it
 # otherwise), then replays it: regenerates each graph from a fresh `Xoshiro(seed)` (matching
 # `create_dataset`'s generation order) and reads its already-solved label and gap from the CSV instead of
 # solving it again. This is necessarily sequential — the RNG stream must be consumed in order.
@@ -20,7 +20,7 @@ using Graphs
 using Random
 using .DataUtils: normalize_graph
 
-export RuntimeDataset, GraphGenerator, ProblemSolver, reset!, label_symmetric
+export RuntimeDataset, GraphGenerator, ProblemSolver, reset!, label_symmetric, dataset_tag, base_solver
 
 """
     GraphGenerator
@@ -45,6 +45,39 @@ Parameters:
     - 'solver': The ProblemSolver instance (defaults to false for generic solvers).
 """
 label_symmetric(::ProblemSolver) = false
+
+"""
+    dataset_tag(solver::ProblemSolver)
+
+Suffix that distinguishes the dataset files of different labelling solvers for the same seed, i.e. for the
+same graphs: `<seed>.csv` for an empty tag (the default, used by the exact solvers) and `<seed>_<tag>.csv`
+otherwise.
+
+Parameters:
+    - 'solver': The ProblemSolver instance (defaults to "" for generic solvers).
+"""
+dataset_tag(::ProblemSolver) = ""
+
+"""
+    canonicalize_label!(solver::ProblemSolver, x::AbstractMatrix, g)
+
+Brings a label into the canonical form of the problem, if its solutions have several equivalent encodings
+(e.g. a cut and its complement). The default leaves the label unchanged.
+
+Parameters:
+    - 'solver': The ProblemSolver instance.
+    - 'x': The label as a (1, n) matrix, modified in place and returned.
+    - 'g': The graph of the instance.
+"""
+canonicalize_label!(::ProblemSolver, x::AbstractMatrix, g) = x
+
+"""
+    base_solver(solver::ProblemSolver)
+
+The solver that defines the problem, i.e. the solver itself, or the wrapped solver of a solver that only
+changes how labels are computed (e.g. `LNSSolver`).
+"""
+base_solver(solver::ProblemSolver) = solver
 
 """
     RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}

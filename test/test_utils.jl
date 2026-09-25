@@ -94,6 +94,40 @@ function _model_eval_signal(m::RectifiedFlow)
 end
 
 """
+    _comparison_stats(comparison_solver, solver, generator, num_test, test_seed, seeds_dir, test_graph_sizes, ref_scores)
+
+Labels the test instances a second time with `comparison_solver` (same seed, hence the same graphs; the
+dataset file is created if it does not exist yet) and compares its objective values with the reference
+instance by instance. Objectives are evaluated with `solver`, so both labellings are scored identically.
+
+Parameters:
+    - 'comparison_solver': The solver whose labels are compared (e.g. Gurobi next to an LNS reference).
+    - 'solver': The solver of the run, used for `evaluate`.
+    - 'generator', 'num_test', 'test_seed', 'seeds_dir': Identify the test dataset.
+    - 'test_graph_sizes': (nodes, edges) of every test instance, to assert that the instances are identical.
+    - 'ref_scores': Objective values of the reference solutions, per test instance.
+"""
+function _comparison_stats(comparison_solver::ProblemSolver, solver::ProblemSolver, generator::GraphGenerator,
+                           num_test::Int, test_seed::Int, seeds_dir::String,
+                           test_graph_sizes::Vector{Tuple{Int,Int}}, ref_scores::Vector{Float64})
+    @info "Labelling the test instances with the comparison solver $(comparison_solver)..."
+    dataset = RuntimeDataset(num_test, generator, comparison_solver, test_seed, seeds_dir)
+    scores = Float64[]
+    gaps = Float64[]
+    for i in 1:num_test
+        g, _ = dataset[i]
+        @assert (g.num_nodes, g.num_edges) == test_graph_sizes[i] "comparison instance $i differs from test instance $i"
+        push!(scores, DiFoG.evaluate(solver, g, vec(g.ndata.x) .> 0.5f0))
+        push!(gaps, _instance_gap(g))
+    end
+    ratio, _, ci95 = _ratio_stats(scores, ref_scores)
+    finite_gaps = _finite(gaps)
+    frac_optimal = isempty(finite_gaps) ? NaN : count(<=(1e-4), finite_gaps) / length(finite_gaps)
+    return (; label = "$(typeof(comparison_solver)) $(comparison_solver)", scores, ratio, ci95, frac_optimal,
+              mean_gap = _mean_or_nan(finite_gaps))
+end
+
+"""
     run_automated_pipeline(; run_id, train_run_id=run_id, model, generator, solver, num_train=1000,
                            num_test=100, num_val=max(20, div(num_train, 20)), epochs=5, batch_size=16,
                            learning_rate=1e-3, num_repeat_inference=5, evaluate=true,
@@ -120,6 +154,9 @@ Parameters:
       its ODE coupling (x₀, Z₁) is generated on the training/validation instances, and the model is
       trained on that coupling instead of the data labels ((k+1)-RF, Reflow). `nothing` = regular training.
     - 'reflow_ode_steps': Euler steps used to generate the Reflow coupling.
+    - 'comparison_solver': Optional second solver that labels the same test instances (same seed, hence the same
+      graphs; e.g. Gurobi next to an `LNSSolver` reference). Its objective values are compared with the
+      reference instance by instance and written to the report. `nothing` = no comparison.
 
 Returns the report path, or `nothing` when `evaluate=false`.
 """
@@ -142,7 +179,8 @@ function run_automated_pipeline(;
     test_seed::Int,
     validation_seed::Int,
     reflow_from::Union{Nothing,String} = nothing,
-    reflow_ode_steps::Int = 100
+    reflow_ode_steps::Int = 100,
+    comparison_solver::Union{Nothing,ProblemSolver} = nothing
 )
     @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
     seeds_dir = joinpath(result_root, "seeds")
@@ -251,6 +289,7 @@ function run_automated_pipeline(;
     per_instance_true_scores = Float64[]
     per_instance_greedy_scores = Float64[]
     instance_gaps = Float64[]
+    test_graph_sizes = Tuple{Int,Int}[]   # (nodes, edges) per test instance, to align a comparison dataset
 
     last_test_graph = nothing
     last_test_instance_idx = 0
@@ -322,6 +361,7 @@ function run_automated_pipeline(;
 
             # R28: quality of the reference solution itself
             push!(instance_gaps, _instance_gap(graphs[j]))
+            push!(test_graph_sizes, (graphs[j].num_nodes, graphs[j].num_edges))
 
             mean_entropy, confidence = DiFoG.heatmap_decisiveness(heatmap_vec)
             total_entropy += mean_entropy
@@ -384,7 +424,7 @@ function run_automated_pipeline(;
     avg_confidence = total_confidence / total_graphs
     avg_entropy = total_entropy / total_graphs
     avg_correction_rate = total_correction_rate / total_graphs
-    corr_rate_str = solver isa MaxCutSolver ? "N/A (threshold decoder)" : string(round(avg_correction_rate, digits=4))
+    corr_rate_str = DiFoG.base_solver(solver) isa MaxCutSolver ? "N/A (threshold decoder)" : string(round(avg_correction_rate, digits=4))
 
     finite_gaps = _finite(instance_gaps)
     n_gap_missing = length(instance_gaps) - length(finite_gaps)
@@ -392,6 +432,10 @@ function run_automated_pipeline(;
     frac_proven_optimal = isempty(finite_gaps) ? NaN : count(<=(1e-4), finite_gaps) / length(finite_gaps)
     mean_gap = _mean_or_nan(finite_gaps)
     max_gap = isempty(finite_gaps) ? NaN : maximum(finite_gaps)
+
+    comparison = isnothing(comparison_solver) ? nothing :
+        _comparison_stats(comparison_solver, solver, generator, num_test, test_seed, seeds_dir,
+                          test_graph_sizes, per_instance_true_scores)
 
 
     @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Reference Score: $(round(avg_true_score, digits=2)) | Mean per-instance ratio vs. reference: $(round(performance_pct, digits=2))% ± $(round(approx_ratio_ci95, digits=2))% (95% CI) | Greedy baseline: $(round(greedy_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
@@ -465,7 +509,7 @@ function run_automated_pipeline(;
             ("Reference Solutions Optimal within MIPGap 1e-4 (fraction)", _fmt(frac_proven_optimal)),
             ("Reference Solution Mean Gap", _fmt(mean_gap; digits=6)),
             ("Reference Solution Max Gap", _fmt(max_gap; digits=6)),
-            ("Instances Without Solver Result", string(n_gap_missing)),
+            ("Instances Without Gap (no bound, e.g. LNS, or no solver result)", string(n_gap_missing)),
         ]; caption="Data configuration for run $(run_id)", label="tab:data-$(label_base)")
 
         println(io, "\\subsubsection{Model Configuration}")
@@ -512,6 +556,16 @@ function run_automated_pipeline(;
             ("Total Inference Time (s)", string(round(total_inference_time, digits=4))),
             ("Avg Inference Time / Instance (s)", string(round(avg_inference_time_per_instance, digits=4))),
         ]
+        if !isnothing(comparison)
+            append!(results_rows, [
+                ("Comparison Solver", comparison.label),
+                ("Comparison Objective, Mean ± Std", _obj_stats(comparison.scores)),
+                ("Comparison vs. Reference, Mean Per-Instance Ratio (%)",
+                 "$(_fmt(comparison.ratio; digits=2)) ± $(_fmt(comparison.ci95; digits=2))"),
+                ("Comparison Solutions Optimal within MIPGap 1e-4 (fraction)", _fmt(comparison.frac_optimal)),
+                ("Comparison Solution Mean Gap", _fmt(comparison.mean_gap; digits=6)),
+            ])
+        end
         write_latex_kv_table(io, results_rows; caption="Results and performance metrics for run $(run_id)", label="tab:results-$(label_base)")
 
         println(io, "\\subsubsection{Heatmap Quality}")
