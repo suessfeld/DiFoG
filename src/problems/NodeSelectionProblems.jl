@@ -437,13 +437,16 @@ The returned solution then corresponds to the augmented `s`.
     value is found, the solver terminates.
 - `warn_time_limit`: If true, a warning is issued if the time limit is reached
     but a feasible solution has been found.
+- `callback`: Optional Gurobi callback `(cb_data, cb_where::Cint) -> nothing` installed via
+    `Gurobi.CallbackFunction()`, e.g. to record the incumbent and bound over time.
 """
 function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing; 
         silent=false, time_limit=inst.config.ilp_time_limit, 
         obj_limit::Union{Nothing,Real}=nothing,
         warn_time_limit::Bool=true,
         env::Gurobi.Env=GRB_ENV[],
-        threads::Int=1) where P <: NodeSelectionProblem
+        threads::Int=1,
+        callback::Union{Nothing,Function}=nothing) where P <: NodeSelectionProblem
         
     @assert P ∈ (MIS, MCP, MAXCUT, DkS)
     n = inst.n
@@ -512,6 +515,7 @@ function ILP!(inst::NSPInstance{P}, s::Union{NSPSolution{P}, Nothing}=nothing;
     end
     x = model[:x]  # make model variables accessible
     MOI.set(model, MOI.NumberOfThreads(), threads)
+    !isnothing(callback) && MOI.set(model, Gurobi.CallbackFunction(), callback)
     # add user defined termination criterion on the objective value 
     !isnothing(obj_limit) && set_optimizer_attribute(model, "BestObjStop", obj_limit)
 
