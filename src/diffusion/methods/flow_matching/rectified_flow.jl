@@ -5,7 +5,9 @@
 #
 # Rectified Flow lives in the continuous domain, so the binary labels are relaxed:
 #   - labels {0, 1} are mapped to the signal space {−1, +1} (x₁ = 2y − 1), as in DIFUSCO's Gaussian variant,
-#   - the source is x₀ ~ N(0, σ²I),
+#   - the source x₀ is drawn from a `SourceDistribution` (src/diffusion/source/): by default pure Gaussian
+#     noise N(0, σ²I), or noise around a degraded solution (`ResidueSource`, DISCO); the flow only calls
+#     `sample_source` and does not know which one it uses,
 #   - the path is the straight line x_τ = τ x₁ + (1 − τ) x₀ with constant velocity x₁ − x₀,
 #   - generation integrates the ODE dx/dτ = v_θ(x_τ, τ) from τ = 0 to τ = 1 (deterministic given x₀).
 #
@@ -25,29 +27,36 @@ using GraphNeuralNetworks
 export RectifiedFlow, generate_reflow_coupling, reflow!, straightness
 
 """
-    RectifiedFlow{S<:TimeSchedule{Float32}} <: Diffusion
+    RectifiedFlow{S<:TimeSchedule{Float32}, Q<:SourceDistribution} <: Diffusion
 
 Represents a (continuous) Rectified Flow on the relaxed node labels.
 
 Fields:
     - 'scheduler': The inference time schedule used (Euler integration grid).
     - 'prediction': Network parameterization, `:x1` (endpoint logit, BCE loss) or `:velocity` (velocity, MSE loss).
-    - 'σ_src': Standard deviation of the Gaussian source distribution.
+    - 'source': The source distribution p₀ every source sample is drawn from (see `SourceDistribution`).
+
+Constructor keywords: `source` (default `GaussianSource(1)`) or, as a shorthand for a Gaussian source,
+`σ_src`; passing both is an error.
 """
-struct RectifiedFlow{S<:TimeSchedule{Float32}} <: Diffusion
+struct RectifiedFlow{S<:TimeSchedule{Float32}, Q<:SourceDistribution} <: Diffusion
     scheduler::S
     prediction::Symbol
-    σ_src::Float32
+    source::Q
 
-    function RectifiedFlow(s::TimeSchedule; prediction::Symbol=:x1, σ_src::Real=1f0)
+    function RectifiedFlow(s::TimeSchedule; prediction::Symbol=:x1,
+                           source::Union{Nothing,SourceDistribution}=nothing,
+                           σ_src::Union{Nothing,Real}=nothing)
         prediction in (:x1, :velocity) ||
             throw(ArgumentError("prediction must be :x1 or :velocity, got :$prediction"))
-        σ_src > 0 || throw(ArgumentError("σ_src must be > 0, got $σ_src"))
+        isnothing(source) || isnothing(σ_src) ||
+            throw(ArgumentError("pass either `source` or `σ_src`, not both"))
+        src = something(source, GaussianSource(something(σ_src, 1f0)))
         if s isa ATSSScheduler
             @warn "RectifiedFlow with an ATSS schedule: ATSS is fitted on the discrete κ mixture path, not on the straight Gaussian path; results are a transferred grid, not an adaptive schedule for this method."
         end
         s_float = convert(TimeSchedule{Float32}, s)
-        return new{typeof(s_float)}(s_float, prediction, Float32(σ_src))
+        return new{typeof(s_float), typeof(src)}(s_float, prediction, src)
     end
 end
 
@@ -66,19 +75,6 @@ _to_signal(y) = 2f0 .* y .- 1f0
 Maps the signal space [−1, 1] back to labels in [0, 1].
 """
 _to_label(x) = (x .+ 1f0) ./ 2f0
-
-"""
-    _random_gaussian(g::GNNGraph, shape::Tuple, σ::Float32)
-
-Samples a Gaussian source state directly on the same device as the input graph.
-
-Parameters:
-    - 'g': The reference graph determining the target device.
-    - 'shape': The dimensions of the generated state.
-    - 'σ': The standard deviation.
-"""
-_random_gaussian(g::GNNGraph, shape::Tuple, σ::Float32) =
-    σ .* randn!(similar(_device_anchor(g), Float32, shape))
 
 """
     _has_coupling(g::GNNGraph)
@@ -104,7 +100,7 @@ _interpolate(τ, x_1::AbstractArray, x_0::AbstractArray) = τ .* x_1 .+ (1f0 .- 
 
 Samples a random time for each graph and places the state on the straight path between the source and
 the (relaxed) target. Uses the stored Reflow source `ndata.x0` if present (fixed coupling), otherwise
-samples an independent Gaussian source.
+draws an independent source sample from `flow.source`.
 
 Parameters:
     - 'flow': The Rectified Flow configuration.
@@ -121,7 +117,7 @@ function corrupt_batch(flow::RectifiedFlow, y::AbstractArray, g::GNNGraph)
     τ_nodes = _node_row(Float32.(t_device) ./ Float32(T), g.graph_indicator, N)
 
     coupled = _has_coupling(g)
-    x_0 = coupled ? g.ndata.x0 : _random_gaussian(g, size(y), flow.σ_src)
+    x_0 = coupled ? g.ndata.x0 : sample_source(flow.source, g, size(y))
     x_1 = _to_signal(y)
 
     x_t = _interpolate(τ_nodes, x_1, x_0)
@@ -272,7 +268,7 @@ _uniform_grid(n::Int) = Float32.(range(0, 1, length=n + 1))
 """
     sample_heatmap(flow::RectifiedFlow, model, shape::Tuple, g::GNNGraph; kwargs...)
 
-Integrates the flow ODE from Gaussian noise on the inference schedule and returns the final state mapped
+Integrates the flow ODE from a sample of `flow.source` on the inference schedule and returns the final state mapped
 to label space and clamped to [0, 1] as the heatmap.
 
 Parameters:
@@ -283,7 +279,7 @@ Parameters:
 """
 function sample_heatmap(flow::RectifiedFlow, model, shape::Tuple, g::GNNGraph; kwargs...)
     @debug "Scheduler State" (; (f => getfield(flow.scheduler, f) for f in fieldnames(typeof(flow.scheduler)))...)
-    x_1 = integrate(flow, model, _random_gaussian(g, shape, flow.σ_src), g, flow.scheduler.steps)
+    x_1 = integrate(flow, model, sample_source(flow.source, g, shape), g, flow.scheduler.steps)
     return clamp.(_to_label(x_1), 0f0, 1f0)
 end
 
@@ -304,7 +300,7 @@ Parameters:
 """
 function straightness(flow::RectifiedFlow, model, g::GNNGraph, shape::Tuple; ode_steps::Int=100)
     τs = _uniform_grid(ode_steps)
-    x_0 = _random_gaussian(g, shape, flow.σ_src)
+    x_0 = sample_source(flow.source, g, shape)
 
     x = x_0
     vs = Vector{typeof(x_0)}(undef, ode_steps)
@@ -344,7 +340,7 @@ function generate_reflow_coupling(model::DiffusionModel{<:GNN,<:RectifiedFlow}, 
         for (g_batch, names) in data_loader
             g_gpu = g_batch |> Flux.gpu
             shape = (model.gnn.config.in_dim, g_gpu.num_nodes)
-            x_0 = _random_gaussian(g_gpu, shape, flow.σ_src)
+            x_0 = sample_source(flow.source, g_gpu, shape)
             z_1 = integrate(flow, model, x_0, g_gpu, τs)
 
             g_new = GNNGraph(g_batch; ndata = (; g_batch.ndata..., x = Flux.cpu(_to_label(z_1)), x0 = Flux.cpu(x_0)))

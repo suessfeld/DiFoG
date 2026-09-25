@@ -15,6 +15,7 @@ include("./utils/gurobi_session.jl")
 
 include("./diffusion/diffusion.jl")
 include("./diffusion/scheduler.jl")
+include("./diffusion/source.jl")
 include("./gnn/gnn.jl")
 
 include("./gnn/gnn_config.jl") 
@@ -36,6 +37,9 @@ include("./utils/data/seeding.jl")
 include("./diffusion/scheduler/linear.jl")
 include("./diffusion/scheduler/cosine.jl")
 include("./diffusion/scheduler/atss.jl")
+
+include("./diffusion/source/gaussian.jl")
+include("./diffusion/source/residue.jl")
 
 include("./gnn/models/AGNN.jl")
 include("./graphs/er.jl")

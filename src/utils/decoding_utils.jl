@@ -8,7 +8,7 @@ using Statistics
 using Random
 
 export hamming_distance, solution_distance, heatmap_decisiveness, correction_distance,
-       degree_baseline_heatmap, random_baseline_score
+       degree_baseline_heatmap, random_baseline_score, residue
 
 """
     decode_heatmap
@@ -23,6 +23,15 @@ function decode_heatmap end
 A generic function that must be overridden by specific ProblemSolvers to evaluate objective values.
 """
 function evaluate end
+
+"""
+    residue(solver::ProblemSolver, g::GNNGraph)
+
+A generic function that must be overridden by specific ProblemSolvers to construct a cheap degraded solution
+X_d ∈ {0, 1}ⁿ of the instance, from which a `ResidueSource` starts generation (DISCO's residue). The degraded
+solution should be feasible and computable without a solver.
+"""
+function residue end
 
 """
     degree_baseline_heatmap(solver::ProblemSolver, g::GNNGraph)

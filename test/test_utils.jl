@@ -66,7 +66,7 @@ _method_label(m::BernoulliDiffusion) = "Bernoulli diffusion (DIFUSCO)"
 _method_label(m::DiscreteFlowMatching) =
     "DFM + consistency (reference form, lambda_cons=$(m.λ_cons)), sampler=$(m.sampler)"
 _method_label(m::RectifiedFlow) =
-    "Rectified flow (Gaussian relaxation, sigma_src=$(m.σ_src)), prediction=$(m.prediction), Euler ODE"
+    "Rectified flow (Gaussian relaxation, source=$(source_label(m.source))), prediction=$(m.prediction), Euler ODE"
 
 """
     _model_eval_signal(method)
