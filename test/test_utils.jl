@@ -71,9 +71,11 @@ _method_label(m::RectifiedFlow) =
 """
     _model_eval_signal(method)
 
-Signal level at every time the network is evaluated during sampling (H2), in evaluation order:
+Signal level at every time the network is evaluated during sampling (H2), in evaluation order, formatted
+identically for all methods as "time: signal":
 ᾱ_t for Bernoulli diffusion (probability of keeping x_0 is (1+ᾱ)/2; ᾱ ≈ 0 means pure noise),
-κ_τ (fraction committed to the target) for flow matching.
+κ_τ (fraction committed to the target) for flow matching,
+τ (weight of the target on the straight path x_τ = τ x₁ + (1 − τ) x₀) for rectified flow.
 """
 function _model_eval_signal(m::BernoulliDiffusion)
     ts = reverse(m.scheduler.steps)[1:end-1]            # T → … → smallest non-zero step
@@ -88,18 +90,14 @@ end
 # Straight path: the target weight at time τ is τ itself.
 function _model_eval_signal(m::RectifiedFlow)
     τs = m.scheduler.steps[1:end-1]
-    return join(["tau=$(round(τ, digits=3))" for τ in τs], ", ")
+    return join(["tau=$(round(τ, digits=3)): $(round(Float64(τ), sigdigits=2))" for τ in τs], ", ")
 end
-
-_model_eval_signal_key(::BernoulliDiffusion)   = "alpha-bar at model evaluations"
-_model_eval_signal_key(::DiscreteFlowMatching) = "Nominal kappa at model evaluations"
-_model_eval_signal_key(::RectifiedFlow)        = "Path times at model evaluations"
 
 """
     run_automated_pipeline(; run_id, train_run_id=run_id, model, generator, solver, num_train=1000,
                            num_test=100, num_val=max(20, div(num_train, 20)), epochs=5, batch_size=16,
-                           learning_rate=1e-3, num_repeat_inference=5, num_random_baseline=10,
-                           evaluate=true, result_root, training_seed, test_seed, validation_seed)
+                           learning_rate=1e-3, num_repeat_inference=5, evaluate=true,
+                           result_root, training_seed, test_seed, validation_seed)
 
 Runs training (or loads an existing model) and, unless `evaluate=false`, a full evaluation that is
 written as a LaTeX report.
@@ -111,11 +109,10 @@ Parameters:
       evaluation cells (scheduler type and `inference_steps` are only used at inference).
     - 'model': The model that should be trained and tested.
     - 'generator': The graph generator.
-    - 'solver': The problem solver (labels, decoder, objective, baselines).
+    - 'solver': The problem solver (labels, decoder, objective, greedy baseline).
     - 'num_train', 'num_test', 'num_val': dataset sizes (`num_val = 0` disables validation).
     - 'epochs', 'batch_size', 'learning_rate': training hyperparameters.
     - 'num_repeat_inference': repeated inferences on the last test instance (stability measurement).
-    - 'num_random_baseline': random heatmaps per test instance for the random baseline (Q16).
     - 'evaluate': `false` → only train/load and save the model, no test evaluation or report (R32).
     - 'result_root': Root directory for models/graphs/seeds/reports/instances.
     - 'training_seed', 'test_seed', 'validation_seed': seeds identifying each split's `<seed>.csv`.
@@ -139,7 +136,6 @@ function run_automated_pipeline(;
     batch_size::Int = 16,
     learning_rate::Float64 = 1e-3,
     num_repeat_inference::Int = 5,
-    num_random_baseline::Int = 10,
     evaluate::Bool = true,
     result_root::String,
     training_seed::Int,
@@ -234,7 +230,6 @@ function run_automated_pipeline(;
 
     # Evaluation randomness (sampler noise) depends only on run_id.
     seed_everything!("eval:" * run_id)
-    baseline_rng = Random.Xoshiro(test_seed)
 
     num_params = sum(length, Flux.trainables(model.gnn))
 
@@ -254,8 +249,7 @@ function run_automated_pipeline(;
 
     per_instance_model_scores = Float64[]
     per_instance_true_scores = Float64[]
-    per_instance_random_scores = Float64[]
-    per_instance_degree_scores = Float64[]
+    per_instance_greedy_scores = Float64[]
     instance_gaps = Float64[]
 
     last_test_graph = nothing
@@ -322,12 +316,9 @@ function run_automated_pipeline(;
             push!(per_instance_model_scores, model_score_j)
             push!(per_instance_true_scores, true_score_j)
 
-            # Q16: controls through the same decoder
-            random_score_j = DiFoG.random_baseline_score(solver, graphs[j], num_random_baseline; rng=baseline_rng)
-            degree_mask = DiFoG.decode_heatmap(solver, graphs[j], DiFoG.degree_baseline_heatmap(solver, graphs[j]))
-            degree_score_j = DiFoG.evaluate(solver, graphs[j], degree_mask)
-            push!(per_instance_random_scores, random_score_j)
-            push!(per_instance_degree_scores, degree_score_j)
+            # Q16: greedy baseline through the same decoder (MIS: min-degree greedy, MaxCut: degree-ordered greedy cut)
+            greedy_mask = DiFoG.decode_heatmap(solver, graphs[j], DiFoG.degree_baseline_heatmap(solver, graphs[j]))
+            push!(per_instance_greedy_scores, DiFoG.evaluate(solver, graphs[j], greedy_mask))
 
             # R28: quality of the reference solution itself
             push!(instance_gaps, _instance_gap(graphs[j]))
@@ -385,8 +376,9 @@ function run_automated_pipeline(;
     ratio_of_means_pct = (avg_model_score / avg_true_score) * 100          # secondary: ratio of averages
     # H5: headline = mean of per-instance ratios, with std and CI of the same quantity
     performance_pct, approx_ratio_std, approx_ratio_ci95 = _ratio_stats(per_instance_model_scores, per_instance_true_scores)
-    random_pct, _, random_ci95 = _ratio_stats(per_instance_random_scores, per_instance_true_scores)
-    degree_pct, _, degree_ci95 = _ratio_stats(per_instance_degree_scores, per_instance_true_scores)
+    greedy_pct, _, greedy_ci95 = _ratio_stats(per_instance_greedy_scores, per_instance_true_scores)
+    # absolute objective values, mean ± σ over instances (as reported in the literature, e.g. Bresich et al.)
+    _obj_stats(v) = "$(_fmt(_mean_or_nan(v); digits=2)) ± $(_fmt(length(v) > 1 ? std(v) : NaN; digits=2))"
     avg_inference_time_per_instance = total_inference_time / total_graphs
 
     avg_confidence = total_confidence / total_graphs
@@ -402,7 +394,7 @@ function run_automated_pipeline(;
     max_gap = isempty(finite_gaps) ? NaN : maximum(finite_gaps)
 
 
-    @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Reference Score: $(round(avg_true_score, digits=2)) | Mean per-instance ratio vs. reference: $(round(performance_pct, digits=2))% ± $(round(approx_ratio_ci95, digits=2))% (95% CI) | Random baseline: $(round(random_pct, digits=2))% | Degree baseline: $(round(degree_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
+    @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Reference Score: $(round(avg_true_score, digits=2)) | Mean per-instance ratio vs. reference: $(round(performance_pct, digits=2))% ± $(round(approx_ratio_ci95, digits=2))% (95% CI) | Greedy baseline: $(round(greedy_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
     @info "Heatmap Quality | Avg Decisiveness: $(round(avg_confidence, digits=4)) (H̄=$(round(avg_entropy, digits=4))) | Avg Greedy Correction Rate: $(round(avg_correction_rate, digits=4))"
     @info "Reference solutions | optimal within MIPGap 1e-4: $(_fmt(frac_proven_optimal)) | mean gap: $(_fmt(mean_gap; digits=6)) | max gap: $(_fmt(max_gap; digits=6)) | without solver result: $n_gap_missing"
 
@@ -487,7 +479,7 @@ function run_automated_pipeline(;
             ("Inference Schedule", string(typeof(model.method.scheduler).name.name)),
             ("Inference Steps", string(model.method.scheduler.inference_steps)),
             ("Configured / effective transitions", "$(model.method.scheduler.inference_steps) / $(length(model.method.scheduler.steps) - 1)"),
-            (_model_eval_signal_key(model.method), _model_eval_signal(model.method)),
+            ("Signal level at model evaluations (alpha-bar / kappa / tau)", _model_eval_signal(model.method)),
         ]; caption="Model configuration for run $(run_id)", label="tab:model-$(label_base)")
 
         println(io, "\\subsubsection{Training Hyperparameters}")
@@ -509,12 +501,14 @@ function run_automated_pipeline(;
             ("Final Validation Loss", model_already_exists ? "N/A (loaded)" : (isnan(final_val_loss) ? "N/A (num_val=0)" : string(round(final_val_loss, digits=6)))),
             ("Avg Reference Solution Score", string(round(avg_true_score, digits=2))),
             ("Avg Predicted Solution Score", string(round(avg_model_score, digits=2))),
+            ("Predicted Objective, Mean ± Std", _obj_stats(per_instance_model_scores)),
+            ("Reference Objective, Mean ± Std", _obj_stats(per_instance_true_scores)),
+            ("Greedy Objective, Mean ± Std", _obj_stats(per_instance_greedy_scores)),
             ("Mean Per-Instance Ratio vs. Reference (%)", _fmt(performance_pct; digits=2)),
             ("Per-Instance Ratio Std Dev (%)", _fmt(approx_ratio_std; digits=2)),
             ("Per-Instance Ratio 95% CI (%, ±)", _fmt(approx_ratio_ci95; digits=2)),
             ("Ratio of Average Scores (%)", _fmt(ratio_of_means_pct; digits=2)),
-            ("Random Heatmap Baseline, Mean Ratio (%, $(num_random_baseline) draws)", "$(_fmt(random_pct; digits=2)) ± $(_fmt(random_ci95; digits=2))"),
-            ("Degree Heuristic Baseline, Mean Ratio (%)", "$(_fmt(degree_pct; digits=2)) ± $(_fmt(degree_ci95; digits=2))"),
+            ("Greedy Baseline, Mean Ratio (%)", "$(_fmt(greedy_pct; digits=2)) ± $(_fmt(greedy_ci95; digits=2))"),
             ("Total Inference Time (s)", string(round(total_inference_time, digits=4))),
             ("Avg Inference Time / Instance (s)", string(round(avg_inference_time_per_instance, digits=4))),
         ]
