@@ -64,6 +64,8 @@ progress; see the `TimeSchedule` time convention).
 - "flow_matching": DFM with the reference Euler sampler (Q6)
 - "flow_matching_exact": DFM with the exact mixture-path step (H1 ablation). The step rule also enters
   the consistency loss, so this is a separately trained model (its own train_run_id).
+- "rectified_flow": continuous Rectified Flow (1-RF) on the {−1, +1} relaxation, endpoint parameterization
+- "reflow": 2-RF, trained on the ODE coupling of the "rectified_flow" model (see `reflow_teacher`)
 """
 function build_method(method_name::String, scheduler::TimeSchedule, κ::Function, κ̇::Function, λ_cons::Float32)
     if method_name == "diffusion"
@@ -72,10 +74,20 @@ function build_method(method_name::String, scheduler::TimeSchedule, κ::Function
         return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:euler)
     elseif method_name == "flow_matching_exact"
         return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:exact)
+    elseif method_name == "rectified_flow" || method_name == "reflow"
+        return RectifiedFlow(scheduler; prediction=:x1)
     else
         error("Unknown method_name: $method_name")
     end
 end
+
+"""
+    reflow_teacher(method_name)
+
+Method whose trained model defines the Reflow coupling for `method_name`, or `nothing` for methods that
+are trained on the data labels. "reflow" must therefore run after "rectified_flow" in the grid.
+"""
+reflow_teacher(method_name::String) = method_name == "reflow" ? "rectified_flow" : nothing
 
 """
     execute_case(; ...)
@@ -94,7 +106,8 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
                        λ_cons::Float32, result_root::String, training_seed::Int, test_seed::Int,
                        validation_seed::Int, num_train::Int, num_test::Int, epochs::Int, batch_size::Int,
                        learning_rate::Float64, num_repeat_inference::Int,
-                       solver::ProblemSolver, evaluate::Bool=true)
+                       solver::ProblemSolver, evaluate::Bool=true,
+                       reflow_from::Union{Nothing,String}=nothing, reflow_ode_steps::Int=100)
 
     if scheduler_name == "atss"
         seed_everything!("atss:" * run_id)
@@ -123,6 +136,8 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
         training_seed = training_seed,
         test_seed = test_seed,
         validation_seed = validation_seed,
+        reflow_from = reflow_from,
+        reflow_ode_steps = reflow_ode_steps,
     )
 end
 
@@ -139,6 +154,7 @@ function main()
     κ̇  = t -> 2.0f0 * t^1.0f0
     atss_p = 0.5f0
     λ_cons = 0.1f0
+    reflow_ode_steps = 100                     # Euler steps generating the Reflow coupling
 
     num_train = 10000
     num_test = 1000
@@ -155,13 +171,17 @@ function main()
 
     # ---- The grid ----
     problems             = ["maxcut", "misp"]
-    methods              = ["diffusion", "flow_matching"]    # add "flow_matching_exact" for the H1 ablation
+    # "reflow" must come after "rectified_flow" (it is trained on that model's ODE coupling);
+    # add "flow_matching_exact" for the H1 ablation
+    methods              = ["diffusion", "flow_matching", "rectified_flow", "reflow"]
     schedulers           = ["linear", "cosine", "atss"]
-    inference_steps_list = [2, 5, 10, 20, 50]
+    inference_steps_list = [1, 2, 5, 10, 20, 50]
 
     # H3: ATSS is fitted on the flow-matching κ path, not on the Bernoulli forward process (ᾱ_t), so
     # Bernoulli × ATSS cells only evaluate a transferred grid. Skipped unless explicitly enabled.
     include_bernoulli_atss = false
+    # Same for Rectified Flow: its path is the straight Gaussian path, not the κ mixture path.
+    include_rectified_flow_atss = false
     # H4: on a rerun, cells whose report already exists are skipped (training is skipped anyway when the
     # model file exists). Set to false to force re-evaluation.
     skip_existing_reports = true
@@ -171,7 +191,7 @@ function main()
     model_num = 0
 
     common = (; generator, gnn_config, total_steps, κ, κ̇, atss_p, λ_cons, result_root,
-                num_train, num_test, epochs, batch_size, learning_rate, num_repeat_inference)
+                num_train, num_test, epochs, batch_size, learning_rate, num_repeat_inference, reflow_ode_steps)
 
     # One (problem, method) at a time: TRAIN once, then run all its evaluations.
     for problem_name in problems
@@ -183,6 +203,8 @@ function main()
         for method_name in methods
             model_num += 1
             train_id = build_train_run_id(problem_name, method_name, generator, gnn_config)
+            teacher = reflow_teacher(method_name)
+            reflow_from = isnothing(teacher) ? nothing : build_train_run_id(problem_name, teacher, generator, gnn_config)
 
             # ---- Train (or load, if this train_id's model already exists); no evaluation (R32) ----
             @info "=== Model $model_num/$n_models: training $train_id ==="
@@ -195,6 +217,7 @@ function main()
                     inference_steps = 2,
                     solver = solver,
                     evaluate = false,
+                    reflow_from = reflow_from,
                 )
             catch e
                 @error "Training $train_id FAILED — skipping its evaluations and continuing with the next model." exception=(e, catch_backtrace())
@@ -209,6 +232,10 @@ function main()
 
                 if method_name == "diffusion" && scheduler_name == "atss" && !include_bernoulli_atss
                     @info "Skipping $run_id (Bernoulli × ATSS disabled, see include_bernoulli_atss)."
+                    continue
+                end
+                if method_name in ("rectified_flow", "reflow") && scheduler_name == "atss" && !include_rectified_flow_atss
+                    @info "Skipping $run_id (Rectified Flow × ATSS disabled, see include_rectified_flow_atss)."
                     continue
                 end
                 if skip_existing_reports && isfile(joinpath(result_root, "reports", "report-$run_id.tex"))
@@ -226,6 +253,7 @@ function main()
                         scheduler_name = scheduler_name,
                         inference_steps = inference_steps,
                         solver = solver,
+                        reflow_from = reflow_from,
                     )
                 catch e
                     @error "Evaluation $run_id FAILED — logging and continuing with the next combination." exception=(e, catch_backtrace())
