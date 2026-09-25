@@ -101,18 +101,6 @@ function degree_baseline_heatmap(::MaxCutSolver, g::GNNGraph)
 end
 
 """
-    residue(solver::MaxCutSolver, g::GNNGraph)
-
-Constructs the degraded solution for a residue source: the degree-ordered greedy cut of
-`degree_baseline_heatmap`. The node of maximum degree is visited first and placed on side 1, which is the
-same orientation the solver's canonicalized labels use.
-
-Parameters:
-    - 'g': The graph structure.
-"""
-residue(solver::MaxCutSolver, g::GNNGraph) = degree_baseline_heatmap(solver, g)
-
-"""
     evaluate(::MaxCutSolver, g::GNNGraph, mask::AbstractVector)
 
 Evaluates the Maximum Cut objective value for a given partition mask.

@@ -103,18 +103,6 @@ Parameters:
 degree_baseline_heatmap(::MISPSolver, g::GNNGraph) = 1f0 ./ (1f0 .+ Float32.(degree(g)))
 
 """
-    residue(solver::MISPSolver, g::GNNGraph)
-
-Constructs the degraded solution for a residue source: the minimum-degree greedy independent set, i.e. the
-degree baseline passed through the greedy decoder. It is feasible and maximal.
-
-Parameters:
-    - 'g': The graph structure.
-"""
-residue(solver::MISPSolver, g::GNNGraph) =
-    Float32.(decode_heatmap(solver, g, degree_baseline_heatmap(solver, g)))
-
-"""
     evaluate(::MISPSolver, g::GNNGraph, mask::AbstractVector)
 
 Evaluates the Maximum Independent Set objective value by calculating the cardinality of the selected node set.

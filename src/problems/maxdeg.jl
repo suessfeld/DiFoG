@@ -70,24 +70,6 @@ Parameters:
 degree_baseline_heatmap(::MaxDegSolver, g::GNNGraph) = Float32.(degree(g))
 
 """
-    residue(::MaxDegSolver, g::GNNGraph)
-
-Constructs the degraded solution for a residue source: the first k nodes in index order, where k is the
-number of maximum-degree nodes. Like DISCO's sequential TSP tour, it has the right size but ignores the
-instance (the degree heuristic itself would already be the exact solution).
-
-Parameters:
-    - 'g': The graph structure.
-"""
-function residue(::MaxDegSolver, g::GNNGraph)
-    degs = degree(g)
-    k = count(==(maximum(degs)), degs)
-    x_d = zeros(Float32, g.num_nodes)
-    x_d[1:k] .= 1f0
-    return x_d
-end
-
-"""
     evaluate(::MaxDegSolver, g::GNNGraph, mask::AbstractVector)
 
 Evaluates the Maximum Degree objective by summing the degrees of the selected nodes.

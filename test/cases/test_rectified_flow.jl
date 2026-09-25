@@ -22,14 +22,11 @@ end
 @testitem "Test RectifiedFlow construction and schedule conversion" setup=[TestRectifiedFlow] begin
     rf = RectifiedFlow(LinearScheduler(1000, 4))
     @test eltype(typeof(rf.scheduler)) == Float32
-    @test rf.prediction === :x1 && rf.source isa GaussianSource && rf.source.σ === 1f0
+    @test rf.prediction === :x1 && rf.σ_src === 1f0
     @test rf.scheduler.steps == Float32[0, 0.25, 0.5, 0.75, 1]
     @test RectifiedFlow(LinearScheduler(1000, 4); prediction=:velocity).prediction === :velocity
-    @test RectifiedFlow(LinearScheduler(1000, 4); σ_src=0.5).source.σ === 0.5f0          # shorthand
-    @test RectifiedFlow(LinearScheduler(1000, 4); source=ResidueSource(MISPSolver())).source isa ResidueSource
     @test_throws ArgumentError RectifiedFlow(LinearScheduler(1000, 4); prediction=:eps)
     @test_throws ArgumentError RectifiedFlow(LinearScheduler(1000, 4); σ_src=0)
-    @test_throws ArgumentError RectifiedFlow(LinearScheduler(1000, 4); σ_src=1, source=GaussianSource(1))
 end
 
 @testitem "Test RectifiedFlow corrupt_batch lies on the straight path" setup=[TestRectifiedFlow] begin
