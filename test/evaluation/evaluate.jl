@@ -61,7 +61,7 @@ Constructs the requested `Diffusion` method. The method constructors convert the
 progress; see the `TimeSchedule` time convention).
 
 - "diffusion": Bernoulli diffusion (DIFUSCO)
-- "flow_matching": DFM with the reference Euler sampler (Q6)
+- "flow_matching": DFM with the exact mixture-path step (sampling and consistency loss)
 - "flow_matching_exact": DFM with the exact mixture-path step (H1 ablation). The step rule also enters
   the consistency loss, so this is a separately trained model (its own train_run_id).
 - "rectified_flow": continuous Rectified Flow (1-RF) on the {−1, +1} relaxation, endpoint parameterization
@@ -71,7 +71,7 @@ function build_method(method_name::String, scheduler::TimeSchedule, κ::Function
     if method_name == "diffusion"
         return BernoulliDiffusion(scheduler)
     elseif method_name == "flow_matching"
-        return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:euler)
+        return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:exact)
     elseif method_name == "flow_matching_exact"
         return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:exact)
     elseif method_name == "rectified_flow" || method_name == "reflow"
@@ -99,6 +99,9 @@ placeholder schedule).
 
 Seeding (R31): the weight initialization depends only on `train_run_id`, the ATSS fit only on
 `run_id`; training and evaluation randomness are seeded inside `run_automated_pipeline`.
+
+`comparison_solver` (optional) labels the test instances a second time for comparison in the report
+(e.g. Gurobi next to the LNS reference); `nothing` = no comparison.
 """
 function execute_case(; run_id::String, train_run_id::String, method_name::String, scheduler_name::String,
                        inference_steps::Int, generator::ERGraphGenerator,
@@ -107,7 +110,8 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
                        validation_seed::Int, num_train::Int, num_test::Int, epochs::Int, batch_size::Int,
                        learning_rate::Float64, num_repeat_inference::Int,
                        solver::ProblemSolver, evaluate::Bool=true,
-                       reflow_from::Union{Nothing,String}=nothing, reflow_ode_steps::Int=100)
+                       reflow_from::Union{Nothing,String}=nothing, reflow_ode_steps::Int=100,
+                       comparison_solver::Union{Nothing,ProblemSolver}=nothing)
 
     if scheduler_name == "atss"
         seed_everything!("atss:" * run_id)
@@ -138,6 +142,7 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
         validation_seed = validation_seed,
         reflow_from = reflow_from,
         reflow_ode_steps = reflow_ode_steps,
+        comparison_solver = comparison_solver,
     )
 end
 
@@ -145,8 +150,12 @@ function main()
     result_root = "/home/e12023149/thesis/results"
 
     # ---- Fixed across the entire grid ----
-    generator = ERGraphGenerator(min_nodes=50, max_nodes=100, p=0.15)
-    solver_time_limit = 60.0
+    generator = ERGraphGenerator(min_nodes=300, max_nodes=400, p=0.15)
+    solver_time_limit = 60.0                   # Gurobi time limit (labels without LNS, or the comparison)
+    # Labels: LNS-rand of Bresich et al. (<seed>_lns.csv), with Gurobi (<seed>.csv) as comparison on the test
+    # instances; false = Gurobi labels (<seed>.csv) as before, without comparison.
+    use_lns_labels = true
+    lns_time_limit = 3.0                       # LNS run time per instance (paper: 3 s)
     # in_dim = node state width (1), time_dim = timestep embedding width (32); same weights as the old in_dim=33
     gnn_config = GNNConfig(num_layers=12, in_dim=1, time_dim=32, hidden_dim=256, output_dim=1)
     total_steps = 1000
@@ -156,17 +165,17 @@ function main()
     λ_cons = 0.1f0
     reflow_ode_steps = 100                     # Euler steps generating the Reflow coupling
 
-    num_train = 10000
-    num_test = 1000
-    epochs = 50
+    num_train = 1000
+    num_test = 100
+    epochs = 5
     batch_size = 32
     learning_rate = 0.001
     num_repeat_inference = 100
 
     # ---- Seeds: one triple per PROBLEM ----
     seeds = Dict(
-        "misp"   => (training = 5010001, test = 5010002, validation = 5010003),
-        "maxcut" => (training = 5010004, test = 5010005, validation = 5010006),
+        "misp"   => (training = 30040001, test = 30040002, validation = 30040003),
+        "maxcut" => (training = 30040004, test = 30040005, validation = 30040006),
     )
 
     # ---- The grid ----
@@ -195,8 +204,10 @@ function main()
 
     # One (problem, method) at a time: TRAIN once, then run all its evaluations.
     for problem_name in problems
-        solver = problem_name == "misp" ? MISPSolver(time_limit=solver_time_limit) :
-                                           MaxCutSolver(time_limit=solver_time_limit)
+        exact_solver = problem_name == "misp" ? MISPSolver(time_limit=solver_time_limit) :
+                                                 MaxCutSolver(time_limit=solver_time_limit)
+        solver = use_lns_labels ? LNSSolver(exact_solver; ttime=lns_time_limit) : exact_solver
+        comparison_solver = use_lns_labels ? exact_solver : nothing
         s = seeds[problem_name]
         split_seeds = (; training_seed = s.training, test_seed = s.test, validation_seed = s.validation)
 
@@ -254,6 +265,7 @@ function main()
                         inference_steps = inference_steps,
                         solver = solver,
                         reflow_from = reflow_from,
+                        comparison_solver = comparison_solver,
                     )
                 catch e
                     @error "Evaluation $run_id FAILED — logging and continuing with the next combination." exception=(e, catch_backtrace())
