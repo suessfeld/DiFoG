@@ -22,8 +22,13 @@
 # The instances are the first N_INST graphs of the TRAINING datasets (seeds below), i.e. exactly the graphs the
 # labels will be created for. Trajectories: results/gurobi_convergence/<problem>_<min>_<max>_<p>_<seed>/.
 
+# The julia module sets JULIA_DEPOT_PATH itself; keep a depot the caller exported before (e.g. a
+# cluster-specific one, JULIA_DEPOT_PATH="$HOME/.julia_cluster:") instead of the module's default.
+CALLER_DEPOT="${JULIA_DEPOT_PATH:-}"
 module load "${JULIA_MODULE:-julia/1.12.1}"
 if [ -n "${GUROBI_MODULE:-}" ]; then module load "$GUROBI_MODULE"; fi
+if [ -n "$CALLER_DEPOT" ]; then export JULIA_DEPOT_PATH="$CALLER_DEPOT"; fi
+echo "Julia depot: ${JULIA_DEPOT_PATH:-<default ~/.julia>}"
 set -eo pipefail
 unset LD_LIBRARY_PATH   # avoid picking up system CUDA libraries when DiFoG loads CUDA.jl
 
@@ -45,7 +50,8 @@ seed_for() {  # <problem> <min_n>
     esac
 }
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+# repository root = three levels above this script, independent of where srun/bash was started
+cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
 for size in $SIZES; do
     NMIN=${size%%:*}
     NMAX=${size##*:}
