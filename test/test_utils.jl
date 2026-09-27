@@ -535,7 +535,9 @@ function run_automated_pipeline(;
             ("Batch Size", string(batch_size)),
             ("Learning Rate", string(learning_rate)),
             ("Validation Instances", string(num_val)),
-            ("Flip-invariant Loss", string(symmetric)),
+            # the flip-invariant loss is inactive on a Reflow coupling (see _prepare_loss for RectifiedFlow)
+            ("Flip-invariant Loss", isnothing(reflow_from) ? string(symmetric) :
+                "false (Reflow coupling; teacher trained with $(symmetric))"),
         ]; caption="Training hyperparameters for run $(run_id)", label="tab:hyperparams-$(label_base)")
 
         println(io, "\\subsubsection{Results \\& Metrics}")
