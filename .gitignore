@@ -28,14 +28,22 @@ LocalPreferences.toml
 JuliaLocalPreferences.toml
 workspace/indent.log
 
-/results/instances/
-/results/models/
-/results/graphs
-/results/reports
-/results_50_100/
+results/results_50_100/graphs
+results/results_50_100/instances
+results/results_50_100/models
+results/results_50_100/reports
+
+results/results_300_400/graphs
+results/results_300_400/instances
+results/results_300_400/models
+results/results_300_400/reports
+
+results/results_700_800/graphs
+results/results_700_800/instances
+results/results_700_800/models
+results/results_700_800/reports
 
 /test/evaluation/evaluate_single.jl
 
 /.vscode
 gurobi.lic
-src/tests/pipelines

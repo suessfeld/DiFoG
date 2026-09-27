@@ -147,10 +147,10 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
 end
 
 function main()
-    result_root = "/home/e12023149/thesis/results"
+    result_root = "/home/e12023149/thesis/results/results_50_100"
 
     # ---- Fixed across the entire grid ----
-    generator = ERGraphGenerator(min_nodes=300, max_nodes=400, p=0.15)
+    generator = ERGraphGenerator(min_nodes=50, max_nodes=100, p=0.15)
     solver_time_limit = 60.0                   # Gurobi time limit (labels without LNS, or the comparison)
     # Labels: LNS-rand of Bresich et al. (<seed>_lns.csv), with Gurobi (<seed>.csv) as comparison on the test
     # instances; false = Gurobi labels (<seed>.csv) as before, without comparison.
@@ -174,8 +174,8 @@ function main()
 
     # ---- Seeds: one triple per PROBLEM ----
     seeds = Dict(
-        "misp"   => (training = 30040001, test = 30040002, validation = 30040003),
-        "maxcut" => (training = 30040004, test = 30040005, validation = 30040006),
+        "misp"   => (training = 5010001, test = 5010002, validation = 5010003),
+        "maxcut" => (training = 5010004, test = 5010005, validation = 5010006),
     )
 
     # ---- The grid ----
