@@ -65,3 +65,25 @@ end
         @test length(bitmask) == nv(generator(rng))
     end
 end
+
+@testitem "Test LNSSolver with greedy start" begin
+    using Graphs
+    using GraphNeuralNetworks
+    using Random
+
+    @test_throws ArgumentError LNSSolver(MaxCutSolver(); init=:foo)
+    @test LNSSolver(MaxCutSolver()).init === :random                                  # default = LNS-rand
+    @test dataset_tag(LNSSolver(MaxCutSolver(); init=:greedy)) == "lnsgreedy"          # own dataset files
+
+    g = ERGraphGenerator(min_nodes=60, max_nodes=60, p=0.2)(Random.Xoshiro(1))
+    gnn = GNNGraph(g)
+    for base in (MaxCutSolver(), MISPSolver())
+        x, gap = LNSSolver(base; ttime=0.2, init=:greedy)(g)                           # `check` inside validates it
+        @test isnan(gap)
+        greedy = DiFoG.evaluate(base, gnn, DiFoG.greedy_mask(base, g))
+        @test DiFoG.evaluate(base, gnn, vec(x) .> 0.5f0) >= greedy                     # never worse than its start
+        if base isa MISPSolver
+            @test all(e -> !(x[1, src(e)] == 1f0 && x[1, dst(e)] == 1f0), edges(g))     # independent
+        end
+    end
+end

@@ -8,11 +8,13 @@
 #   julia --project=. test/evaluation/create_dataset.jl <problem> <min_n> <max_n> <p> <seed> <num_instances> \
 #         <solver> <time_limit_s> [result_root]
 #   problem ∈ {misp, maxcut}
-#   solver  ∈ {lns, gurobi}: lns = LNS-rand of Bresich et al. (d = 5, r = 2000 MIS / 1000 MaxCut), the time limit
-#             is the LNS run time per instance (paper: 3 s); gurobi = ILP, the time limit is Gurobi's.
+#   solver  ∈ {lns, lnsgreedy, gurobi}: lns = LNS-rand of Bresich et al. (d = 5, r = 2000 MIS / 1000 MaxCut), the
+#             time limit is the LNS run time per instance (paper: 3 s); lnsgreedy = the same LNS started from the
+#             degree greedy solution instead of a random one; gurobi = ILP, the time limit is Gurobi's.
 #   Gurobi threads: $GRB_THREADS if set, otherwise DiFoG's default (half of the CPU threads).
 #
-# Files: <result_root>/seeds/<seed>.csv (gurobi) and <seed>_lns.csv (lns). Both describe the SAME graphs, so
+# Files: <result_root>/seeds/<seed>.csv (gurobi), <seed>_lns.csv (lns) and <seed>_lnsgreedy.csv (lnsgreedy).
+# All describe the SAME graphs, so
 # the two labellings of one seed can be created at the same time in two processes, e.g.
 #   julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040005 100 lns 3    &
 #   julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040005 100 gurobi 60 &
@@ -39,7 +41,8 @@ function build_solver(problem::String, solver_name::String, time_limit::Float64)
            error("unknown problem '$problem' (misp | maxcut)\n$USAGE")
     solver_name == "gurobi" && return base
     solver_name == "lns" && return LNSSolver(base; ttime=time_limit)
-    error("unknown solver '$solver_name' (lns | gurobi)\n$USAGE")
+    solver_name == "lnsgreedy" && return LNSSolver(base; ttime=time_limit, init=:greedy)
+    error("unknown solver '$solver_name' (lns | lnsgreedy | gurobi)\n$USAGE")
 end
 
 function main(args)

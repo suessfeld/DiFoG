@@ -156,6 +156,9 @@ function main()
     # instances; false = Gurobi labels (<seed>.csv) as before, without comparison.
     use_lns_labels = true
     lns_time_limit = 3.0                       # LNS run time per instance (paper: 3 s)
+    # LNS start: :random = LNS-rand (<seed>_lns.csv), :greedy = start from the degree greedy (<seed>_lnsgreedy.csv);
+    # :greedy for ER-700-800, where LNS-rand stays below the greedy within 3 s on MaxCut
+    lns_init = :random
     # in_dim = node state width (1), time_dim = timestep embedding width (32); same weights as the old in_dim=33
     gnn_config = GNNConfig(num_layers=12, in_dim=1, time_dim=32, hidden_dim=256, output_dim=1)
     total_steps = 1000
@@ -206,7 +209,7 @@ function main()
     for problem_name in problems
         exact_solver = problem_name == "misp" ? MISPSolver(time_limit=solver_time_limit) :
                                                  MaxCutSolver(time_limit=solver_time_limit)
-        solver = use_lns_labels ? LNSSolver(exact_solver; ttime=lns_time_limit) : exact_solver
+        solver = use_lns_labels ? LNSSolver(exact_solver; ttime=lns_time_limit, init=lns_init) : exact_solver
         comparison_solver = use_lns_labels ? exact_solver : nothing
         s = seeds[problem_name]
         split_seeds = (; training_seed = s.training, test_seed = s.test, validation_seed = s.validation)
