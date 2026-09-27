@@ -52,7 +52,7 @@ function main(args)
     p = parse(Float64, args[4])
     seed, num_instances = parse(Int, args[5]), parse(Int, args[6])
     time_limit = parse(Float64, args[8])
-    result_root = length(args) == 9 ? args[9] : "/home/e12023149/thesis/results"
+    result_root = length(args) == 9 ? args[9] : "/home/e12023149/thesis/results/results_50_100/"
 
     haskey(ENV, "GRB_THREADS") && (DiFoG.GRB_THREADS[] = parse(Int, ENV["GRB_THREADS"]))
 
