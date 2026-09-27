@@ -25,6 +25,17 @@ end
 Flux.@layer DiffusionModel
 
 """
+    _model_device(model::DiffusionModel)
+
+Returns the device transfer function matching the model's parameters: `Flux.cpu` for a model on the CPU,
+`Flux.gpu` otherwise. Data is moved with it, so a CPU model also works on a machine with a GPU.
+
+Parameters:
+    - 'model': The diffusion model.
+"""
+_model_device(model::DiffusionModel) = first(Flux.trainables(model.gnn)) isa Array ? Flux.cpu : Flux.gpu
+
+"""
     _nodewise(v::AbstractVector, gi, N::Int)
 
 Broadcasts a per-graph vector to one entry per node using the graph indicator, or repeats it for a single unbatched graph.
@@ -118,7 +129,7 @@ Parameters:
     - 'g': The batch of graphs.
 """
 function _time_embedding(gnn::GNN, timesteps::AbstractVector{<:Integer}, g::GNNGraph)
-    @assert length(timesteps) == g.num_graphs "expected one timestep per graph ($(g.num_graphs)), got$(length(timesteps))"
+    @assert length(timesteps) == g.num_graphs "expected one timestep per graph ($(g.num_graphs)), got $(length(timesteps))"
     return get_timestep_embedding(timesteps, gnn.config.time_dim)
 end
 
@@ -283,7 +294,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
             batch_size = length(names_batch)
             loss_parts = nothing
             batch_time = @elapsed begin
-                g_batch = g_batch |> Flux.gpu
+                g_batch = g_batch |> _model_device(model)
                 x_start = g_batch.ndata.x
                 x_t, timesteps, x_target, aux = corrupt_batch(model.method, x_start, g_batch)
 
@@ -301,7 +312,7 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
             total_instances += batch_size
 
             parts_str = _format_parts(loss_parts)
-            @info "Batch $num_batches [$total_instances instances total] \vert{} Total:$(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s \vert{} Loss:$(round(loss, digits=4))" * (isempty(parts_str) ? "" : " | " * parts_str)
+            @info "Batch $num_batches [$total_instances instances total] | Total: $(round(batch_time, digits=4))s | Instance GPU Time: $(round(avg_time_per_instance, digits=4))s | Loss: $(round(loss, digits=4))" * (isempty(parts_str) ? "" : " | " * parts_str)
 
             epoch_loss += loss
             push!(batch_loss_history, loss)
@@ -314,9 +325,9 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
             val_loss = _validation_loss(model, val_loader; symmetric_labels=symmetric_labels)
             push!(val_loss_history, val_loss)
             push!(val_loss_batches, global_batch_num)
-            @info "Epoch $epoch | Avg Train Loss: $avg_loss \vert{} Avg Val Loss:$val_loss"
+            @info "Epoch $epoch | Avg Train Loss: $avg_loss | Avg Val Loss: $val_loss"
         else
-            @info "Epoch $epoch \vert{} Avg Loss:$avg_loss"
+            @info "Epoch $epoch | Avg Loss: $avg_loss"
         end
     end
 
@@ -368,7 +379,7 @@ function _validation_loss_unseeded(model::DiffusionModel, val_loader, symmetric_
     n_batches = 0
 
     for (g_batch, _) in val_loader
-        g_batch = g_batch |> Flux.gpu
+        g_batch = g_batch |> _model_device(model)
         x_start = g_batch.ndata.x
         x_t, timesteps, x_target, aux = corrupt_batch(model.method, x_start, g_batch)
         parts = compute_loss(model.gnn, model.method, x_t, timesteps, g_batch, x_target, aux;
@@ -391,7 +402,7 @@ Parameters:
     - 'batch': The batch of graphs to process.
 """
 function infer(model::DiffusionModel, batch::GNNGraph)
-    g_gpu = batch |> Flux.gpu
+    g_gpu = batch |> _model_device(model)
     shape = (model.gnn.config.in_dim, g_gpu.num_nodes)   # M7
     heatmap_gpu = DiFoG.sample_heatmap(model.method, model, shape, g_gpu)
     return heatmap_gpu |> Flux.cpu

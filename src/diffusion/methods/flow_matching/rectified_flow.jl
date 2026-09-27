@@ -22,7 +22,7 @@ using NNlib
 using Functors
 using GraphNeuralNetworks
 
-export RectifiedFlow, generate_reflow_coupling, reflow!, straightness
+export RectifiedFlow, generate_reflow_coupling, straightness
 
 """
     RectifiedFlow{S<:TimeSchedule{Float32}} <: Diffusion
@@ -43,8 +43,8 @@ struct RectifiedFlow{S<:TimeSchedule{Float32}} <: Diffusion
         prediction in (:x1, :velocity) ||
             throw(ArgumentError("prediction must be :x1 or :velocity, got :$prediction"))
         σ_src > 0 || throw(ArgumentError("σ_src must be > 0, got $σ_src"))
-        if s isa ATSSScheduler
-            @warn "RectifiedFlow with an ATSS schedule: ATSS is fitted on the discrete κ mixture path, not on the straight Gaussian path; results are a transferred grid, not an adaptive schedule for this method."
+        if s isa ATSSScheduler && s.path !== :rectified_flow
+            @warn "RectifiedFlow with an ATSS schedule fitted on the $(s.path) path, not on the straight Gaussian path (fit it with path=:rectified_flow); results are a transferred grid, not an adaptive schedule for this method."
         end
         s_float = convert(TimeSchedule{Float32}, s)
         return new{typeof(s_float)}(s_float, prediction, Float32(σ_src))
@@ -319,77 +319,55 @@ function straightness(flow::RectifiedFlow, model, g::GNNGraph, shape::Tuple; ode
 end
 
 """
-    generate_reflow_coupling(model::DiffusionModel{<:GNN,<:RectifiedFlow}, data_loader; ode_steps::Int=100)
+    generate_reflow_coupling(model::DiffusionModel{<:GNN,<:RectifiedFlow}, data_loader; ode_steps::Int=100,
+                             pairs_per_instance::Int=1)
 
 Generates the Reflow coupling (x₀, Z₁ = ODE(x₀)) with the trained flow for every instance of the data
 loader. Returns a vector of `(graph, name)` tuples whose `ndata.x` holds Z₁ in label space (soft labels)
 and `ndata.x0` the source x₀; all other graph data is kept. The result can be wrapped in a
 `Flux.DataLoader(...; collate=true)` and passed to `train_diffusion_model!`.
 
-A `RuntimeDataset` supports one pass per producer: pass a fresh one or `reset!` it beforehand.
+With `pairs_per_instance = K > 1`, the loader is traversed K times and every pass draws a fresh x₀ per
+instance, so the coupling covers the source distribution with K pairs per graph instead of one (Liu et al.
+generate a large set of pairs; with a single x₀ per graph, the 2-RF mainly learns those trajectories).
+A `RuntimeDataset` supports one pass per producer: pass a fresh one or `reset!` it beforehand; for later
+passes it is reset automatically.
 
 Parameters:
     - 'model': The trained Rectified Flow model defining the coupling.
     - 'data_loader': Iterable of batched `(GNNGraph, names)` (e.g. a collating `Flux.DataLoader`).
     - 'ode_steps': The number of uniform Euler steps used to integrate the ODE (should be fine).
+    - 'pairs_per_instance': The number of (x₀, Z₁) pairs generated per instance.
 """
 function generate_reflow_coupling(model::DiffusionModel{<:GNN,<:RectifiedFlow}, data_loader;
-                                  ode_steps::Int=100)
+                                  ode_steps::Int=100, pairs_per_instance::Int=1)
+    pairs_per_instance >= 1 || throw(ArgumentError("pairs_per_instance must be ≥ 1, got $pairs_per_instance"))
     flow = model.method
     τs = _uniform_grid(ode_steps)
     coupling = Tuple{GNNGraph,String}[]
 
     Flux.testmode!(model.gnn)
     try
-        for (g_batch, names) in data_loader
-            g_gpu = g_batch |> Flux.gpu
-            shape = (model.gnn.config.in_dim, g_gpu.num_nodes)
-            x_0 = _random_gaussian(g_gpu, shape, flow.σ_src)
-            z_1 = integrate(flow, model, x_0, g_gpu, τs)
+        for pass in 1:pairs_per_instance
+            if pass > 1 && data_loader isa Flux.DataLoader && data_loader.data isa RuntimeDataset
+                reset!(data_loader.data)
+            end
+            for (g_batch, names) in data_loader
+                g_gpu = g_batch |> _model_device(model)
+                shape = (model.gnn.config.in_dim, g_gpu.num_nodes)
+                x_0 = _random_gaussian(g_gpu, shape, flow.σ_src)
+                z_1 = integrate(flow, model, x_0, g_gpu, τs)
 
-            g_new = GNNGraph(g_batch; ndata = (; g_batch.ndata..., x = Flux.cpu(_to_label(z_1)), x0 = Flux.cpu(x_0)))
-            graphs = Flux.unbatch(g_new)
-            @assert length(graphs) == length(names) "expected one name per graph, got $(length(graphs)) graphs and $(length(names)) names"
-            append!(coupling, zip(graphs, names))
+                g_new = GNNGraph(g_batch; ndata = (; g_batch.ndata..., x = Flux.cpu(_to_label(z_1)), x0 = Flux.cpu(x_0)))
+                graphs = Flux.unbatch(g_new)
+                @assert length(graphs) == length(names) "expected one name per graph, got $(length(graphs)) graphs and $(length(names)) names"
+                append!(coupling, zip(graphs, names))
+            end
         end
     finally
         Flux.trainmode!(model.gnn)
     end
 
-    @info "Generated Reflow coupling for $(length(coupling)) instances ($ode_steps Euler steps)."
+    @info "Generated Reflow coupling: $(length(coupling)) pairs ($pairs_per_instance per instance, $ode_steps Euler steps)."
     return coupling
-end
-
-"""
-    reflow!(model::DiffusionModel{<:GNN,<:RectifiedFlow}, optim, data_loader; ode_steps::Int=100,
-            epochs::Int=5, batch_size::Int=32, val_loader=nothing, symmetric_labels::Bool=false)
-
-Performs one Reflow round in place: generates the coupling with the current model (k-RF) on the
-training (and validation) instances, then continues training the same weights on that coupling, which
-yields the (k+1)-RF. Returns the loss histories of `train_diffusion_model!`.
-
-Parameters:
-    - 'model': The trained Rectified Flow model (weights are warm-started from it).
-    - 'optim': The optimizer state.
-    - 'data_loader': Loader of training instances (only the graphs are used, not the labels).
-    - 'ode_steps': The number of Euler steps used to generate the coupling.
-    - 'epochs': The number of training epochs on the coupling.
-    - 'batch_size': The batch size used on the coupling.
-    - 'val_loader': Optional loader of validation instances (a coupling is generated for them as well).
-    - 'symmetric_labels': Passed on; the flip-invariant loss is inactive on a coupling anyway.
-"""
-function reflow!(model::DiffusionModel{<:GNN,<:RectifiedFlow}, optim, data_loader;
-                 ode_steps::Int=100, epochs::Int=5, batch_size::Int=32,
-                 val_loader=nothing, symmetric_labels::Bool=false)
-    train_coupling = generate_reflow_coupling(model, data_loader; ode_steps)
-    train_loader = Flux.DataLoader(train_coupling; batchsize=batch_size, shuffle=true, collate=true)
-
-    val_coupling_loader = nothing
-    if !isnothing(val_loader)
-        val_coupling = generate_reflow_coupling(model, val_loader; ode_steps)
-        val_coupling_loader = Flux.DataLoader(val_coupling; batchsize=batch_size, shuffle=false, collate=true)
-    end
-
-    return train_diffusion_model!(model, optim, train_loader; epochs, val_loader=val_coupling_loader,
-                                  symmetric_labels)
 end

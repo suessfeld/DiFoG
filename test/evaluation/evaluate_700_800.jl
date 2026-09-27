@@ -35,19 +35,36 @@ function build_train_run_id(problem_name::String, method_name::String, generator
 end
 
 """
-    build_scheduler(scheduler_name, generator, solver, total_steps, inference_steps, κ, κ̇, atss_p)
+    atss_path(method_name)
+
+The path ATSS is fitted on for a method: :diffusion, :flow_matching (also the Euler ablation) or :rectified_flow
+(also Reflow).
+"""
+function atss_path(method_name::String)
+    method_name == "diffusion" && return :diffusion
+    startswith(method_name, "flow_matching") && return :flow_matching
+    method_name in ("rectified_flow", "reflow") && return :rectified_flow
+    error("Unknown method_name: $method_name")
+end
+
+"""
+    build_scheduler(scheduler_name, method_name, generator, solver, total_steps, inference_steps, κ, κ̇, atss_p)
 
 Constructs the requested `TimeSchedule`. `generator`/`solver` are only used by "atss" (to fit the
-schedule); Linear/Cosine ignore them.
+schedule); Linear/Cosine ignore them. ATSS (Algorithm 1 of EFLOCO) is fitted on the path of the method:
+the DFM mixture path (κ), the Bernoulli forward process of DDPM (κ = ᾱ), or the straight Gaussian path of
+Rectified Flow / Reflow (κ(τ) = τ); see `atss_path`.
 """
-function build_scheduler(scheduler_name::String, generator::GraphGenerator, solver::ProblemSolver,
-                          total_steps::Int, inference_steps::Int, κ::Function, κ̇::Function, atss_p::Float32)
+function build_scheduler(scheduler_name::String, method_name::String, generator::GraphGenerator,
+                          solver::ProblemSolver, total_steps::Int, inference_steps::Int, κ::Function,
+                          κ̇::Function, atss_p::Float32)
     if scheduler_name == "linear"
         return LinearScheduler(total_steps, inference_steps)
     elseif scheduler_name == "cosine"
         return CosineScheduler(total_steps, inference_steps)
     elseif scheduler_name == "atss"
-        return ATSSScheduler(generator, solver, total_steps, inference_steps, κ, κ̇; atss_p=atss_p)
+        return ATSSScheduler(generator, solver, total_steps, inference_steps, κ, κ̇; atss_p=atss_p,
+                             path=atss_path(method_name))
     else
         error("Unknown scheduler_name: $scheduler_name")
     end
@@ -62,8 +79,8 @@ progress; see the `TimeSchedule` time convention).
 
 - "diffusion": Bernoulli diffusion (DIFUSCO)
 - "flow_matching": DFM with the exact mixture-path step (sampling and consistency loss)
-- "flow_matching_exact": DFM with the exact mixture-path step (H1 ablation). The step rule also enters
-  the consistency loss, so this is a separately trained model (its own train_run_id).
+- "flow_matching_euler": DFM with the Euler step of EFLOCO (step-rule ablation). The step rule also
+  enters the consistency loss, so this trains a separate model.
 - "rectified_flow": continuous Rectified Flow (1-RF) on the {−1, +1} relaxation, endpoint parameterization
 - "reflow": 2-RF, trained on the ODE coupling of the "rectified_flow" model (see `reflow_teacher`)
 """
@@ -72,8 +89,8 @@ function build_method(method_name::String, scheduler::TimeSchedule, κ::Function
         return BernoulliDiffusion(scheduler)
     elseif method_name == "flow_matching"
         return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:exact)
-    elseif method_name == "flow_matching_exact"
-        return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:exact)
+    elseif method_name == "flow_matching_euler"
+        return DiscreteFlowMatching(scheduler, λ_cons, κ, κ̇; sampler=:euler)
     elseif method_name == "rectified_flow" || method_name == "reflow"
         return RectifiedFlow(scheduler; prediction=:x1)
     else
@@ -111,12 +128,14 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
                        learning_rate::Float64, num_repeat_inference::Int,
                        solver::ProblemSolver, evaluate::Bool=true,
                        reflow_from::Union{Nothing,String}=nothing, reflow_ode_steps::Int=100,
+                       reflow_pairs_per_instance::Int=1,
                        comparison_solver::Union{Nothing,ProblemSolver}=nothing)
 
     if scheduler_name == "atss"
         seed_everything!("atss:" * run_id)
     end
-    scheduler = build_scheduler(scheduler_name, generator, solver, total_steps, inference_steps, κ, κ̇, atss_p)
+    scheduler = build_scheduler(scheduler_name, method_name, generator, solver, total_steps, inference_steps,
+                                κ, κ̇, atss_p)
     method = build_method(method_name, scheduler, κ, κ̇, λ_cons)
 
     seed_everything!("init:" * train_run_id)
@@ -142,6 +161,7 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
         validation_seed = validation_seed,
         reflow_from = reflow_from,
         reflow_ode_steps = reflow_ode_steps,
+        reflow_pairs_per_instance = reflow_pairs_per_instance,
         comparison_solver = comparison_solver,
     )
 end
@@ -168,6 +188,7 @@ function main()
     atss_p = 0.5f0
     λ_cons = 0.1f0
     reflow_ode_steps = 100                     # Euler steps generating the Reflow coupling
+    reflow_pairs_per_instance = 1              # (x₀, Z₁) pairs per training instance, each with a fresh x₀
 
     num_train = 1000
     num_test = 100
@@ -185,16 +206,11 @@ function main()
     # ---- The grid ----
     problems             = ["maxcut", "misp"]
     # "reflow" must come after "rectified_flow" (it is trained on that model's ODE coupling);
-    # add "flow_matching_exact" for the H1 ablation
+    # add "flow_matching_euler" for the step-rule ablation
     methods              = ["diffusion", "flow_matching", "rectified_flow", "reflow"]
     schedulers           = ["linear", "cosine", "atss"]
     inference_steps_list = [1, 2, 5, 10, 20, 50]
 
-    # H3: ATSS is fitted on the flow-matching κ path, not on the Bernoulli forward process (ᾱ_t), so
-    # Bernoulli × ATSS cells only evaluate a transferred grid. Skipped unless explicitly enabled.
-    include_bernoulli_atss = false
-    # Same for Rectified Flow: its path is the straight Gaussian path, not the κ mixture path.
-    include_rectified_flow_atss = false
     # H4: on a rerun, cells whose report already exists are skipped (training is skipped anyway when the
     # model file exists). Set to false to force re-evaluation.
     skip_existing_reports = true
@@ -204,7 +220,8 @@ function main()
     model_num = 0
 
     common = (; generator, gnn_config, total_steps, κ, κ̇, atss_p, λ_cons, result_root,
-                num_train, num_test, epochs, batch_size, learning_rate, num_repeat_inference, reflow_ode_steps)
+                num_train, num_test, epochs, batch_size, learning_rate, num_repeat_inference, reflow_ode_steps,
+                reflow_pairs_per_instance)
 
     # One (problem, method) at a time: TRAIN once, then run all its evaluations.
     for problem_name in problems
@@ -245,14 +262,6 @@ function main()
                 eval_num += 1
                 run_id = build_run_id(problem_name, method_name, generator, gnn_config, scheduler_name, inference_steps)
 
-                if method_name == "diffusion" && scheduler_name == "atss" && !include_bernoulli_atss
-                    @info "Skipping $run_id (Bernoulli × ATSS disabled, see include_bernoulli_atss)."
-                    continue
-                end
-                if method_name in ("rectified_flow", "reflow") && scheduler_name == "atss" && !include_rectified_flow_atss
-                    @info "Skipping $run_id (Rectified Flow × ATSS disabled, see include_rectified_flow_atss)."
-                    continue
-                end
                 if skip_existing_reports && isfile(joinpath(result_root, "reports", "report-$run_id.tex"))
                     @info "Skipping $run_id (report already exists)."
                     continue

@@ -15,8 +15,9 @@
 # Optionally (`init=:greedy`, a deviation from the paper), the LNS starts from the degree greedy solution of the
 # problem (the same greedy as the evaluation baseline) instead of a random one; destroy, repair, acceptance and
 # time limit are unchanged. On large graphs, 3 s are too short for LNS-rand to get far beyond its random start.
-# An LNS provides no bound, so the gap written to the dataset is NaN. With a time limit, the labels depend on the
-# speed of the machine and are not bit-for-bit reproducible; the graphs themselves remain seeded.
+# An LNS provides no bound, so the gap written to the dataset is NaN. The random decisions of the LNS are seeded
+# per instance (from the graph); with a time limit, the labels still depend on the speed of the machine (number of
+# iterations) and are not bit-for-bit reproducible across machines; the graphs themselves remain seeded.
 
 using Graphs
 using JuMP
@@ -139,7 +140,17 @@ function (solver::LNSSolver)(g::Graphs.SimpleGraph)
               [MHMethod("de", baseline_destroy!, solver.n_destroy)],
               [MHMethod("re", iterative_random_repair!, solver.n_iter_repair)];
               consider_initial_sol=true, log=false, lfreq=0, titer=-1, ttime=solver.ttime, tobj=-1.0)
-    run!(lns)
+
+    # MHLib and NodeSelectionProblems.jl draw from the global RNG: seed it from the graph, so the random decisions
+    # of the LNS depend only on the instance, and restore it afterwards, so the caller's random stream (e.g. the
+    # training) is not affected. Only the number of iterations within the time limit still depends on the machine.
+    rng_state = copy(Random.default_rng())
+    Random.seed!(hash((nv(g), [(src(e), dst(e)) for e in edges(g)])))
+    try
+        run!(lns)
+    finally
+        copy!(Random.default_rng(), rng_state)
+    end
 
     best = lns.scheduler.incumbent
     check(best)

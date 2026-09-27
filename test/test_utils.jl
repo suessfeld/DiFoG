@@ -154,6 +154,11 @@ Parameters:
       its ODE coupling (x₀, Z₁) is generated on the training/validation instances, and the model is
       trained on that coupling instead of the data labels ((k+1)-RF, Reflow). `nothing` = regular training.
     - 'reflow_ode_steps': Euler steps used to generate the Reflow coupling.
+    - 'reflow_pairs_per_instance': (x₀, Z₁) pairs generated per training instance for the Reflow coupling; every
+      pair draws a fresh x₀ (the validation coupling always uses one pair per instance).
+    - 'straightness_instances': `RectifiedFlow` only. Number of test instances on which the straightness of the
+      learned flow (Liu et al., Def. 3.2) and the one-step endpoint error are measured with 100 Euler steps, after
+      all other measurements (so their random streams are unchanged). `0` = not measured.
     - 'comparison_solver': Optional second solver that labels the same test instances (same seed, hence the same
       graphs; e.g. Gurobi next to an `LNSSolver` reference). Its objective values are compared with the
       reference instance by instance and written to the report. `nothing` = no comparison.
@@ -180,6 +185,8 @@ function run_automated_pipeline(;
     validation_seed::Int,
     reflow_from::Union{Nothing,String} = nothing,
     reflow_ode_steps::Int = 100,
+    reflow_pairs_per_instance::Int = 1,
+    straightness_instances::Int = 20,
     comparison_solver::Union{Nothing,ProblemSolver} = nothing
 )
     @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
@@ -192,13 +199,32 @@ function run_automated_pipeline(;
 
     model_already_exists = isfile(model_path)
 
+    # training fingerprint, stored next to the weights and checked on load (a stale model file trained with other
+    # labels, another sampler, ... must not be reused silently). Batch size, epochs and learning rate only warn,
+    # since the batch size may be lowered for the evaluation alone.
+    train_meta = Dict{String,String}(
+        "solver" => string(solver),
+        "method" => _method_label(model.method),
+        "total_steps" => string(model.method.scheduler.total_steps),
+        "num_train" => string(num_train),
+        "training_seed" => string(training_seed),
+        "reflow_from" => something(reflow_from, "none"),
+        "reflow_coupling" => isnothing(reflow_from) ? "none" :
+                             "$reflow_ode_steps Euler steps, $reflow_pairs_per_instance pair(s) per instance",
+        "epochs" => string(epochs),
+        "batch_size" => string(batch_size),
+        "learning_rate" => string(learning_rate),
+    )
+    strict_meta_keys = ["solver", "method", "total_steps", "num_train", "training_seed", "reflow_from",
+                        "reflow_coupling"]
+
     final_train_loss = NaN
     final_val_loss = NaN
     val_loader = nothing
 
     if model_already_exists
         @info "Found existing model for train_run_id '$train_run_id' at $model_path — loading weights and skipping training."
-        DiFoG.load_model!(model, model_path)
+        DiFoG.load_model!(model, model_path; expected_meta=train_meta, strict_keys=strict_meta_keys)
     else
         @info "No existing model found for train_run_id '$train_run_id' — training from scratch."
 
@@ -224,9 +250,10 @@ function run_automated_pipeline(;
             model.method isa RectifiedFlow || error("reflow_from is only supported for RectifiedFlow, got $(typeof(model.method))")
             teacher_path = joinpath(models_dir, "model-$reflow_from.jld2")
             isfile(teacher_path) || error("Reflow teacher model '$reflow_from' not found at $teacher_path — train it first.")
-            @info "Reflow: warm-starting from $teacher_path and generating its coupling ($(reflow_ode_steps) Euler steps)..."
+            @info "Reflow: warm-starting from $teacher_path and generating its coupling ($(reflow_ode_steps) Euler steps, $(reflow_pairs_per_instance) pair(s) per instance)..."
             DiFoG.load_model!(model, teacher_path)
-            coupling = DiFoG.generate_reflow_coupling(model, train_loader; ode_steps=reflow_ode_steps)
+            coupling = DiFoG.generate_reflow_coupling(model, train_loader; ode_steps=reflow_ode_steps,
+                                                      pairs_per_instance=reflow_pairs_per_instance)
             train_loader = Flux.DataLoader(coupling, batchsize=batch_size, shuffle=true, collate=true)
             if !isnothing(val_loader)
                 val_coupling = DiFoG.generate_reflow_coupling(model, val_loader; ode_steps=reflow_ode_steps)
@@ -250,7 +277,7 @@ function run_automated_pipeline(;
         final_val_loss = isempty(val_loss_history) ? NaN : val_loss_history[end]
 
         @info "Saving trained model weights immediately after training completes..."
-        DiFoG.save_model(model, model_path)
+        DiFoG.save_model(model, model_path; meta=train_meta)
         @info "Model successfully saved to $model_path"
 
         graphs_dir = joinpath(result_root, "graphs")
@@ -293,6 +320,7 @@ function run_automated_pipeline(;
 
     last_test_graph = nothing
     last_test_instance_idx = 0
+    straightness_graphs = GNNGraph[]   # first test instances, for the straightness of a RectifiedFlow
 
     test_results_dir = joinpath(result_root, "instances", "test_instances_$run_id")
     mkpath(test_results_dir)
@@ -305,11 +333,16 @@ function run_automated_pipeline(;
     for batch in test_loader
         graphs = [item[1] for item in batch]
         names = ["test_instance_$(global_test_idx + k - 1).txt" for k in 1:length(graphs)]
+        if model.method isa RectifiedFlow
+            for gr in graphs
+                length(straightness_graphs) < straightness_instances && push!(straightness_graphs, gr)
+            end
+        end
         global_test_idx += length(graphs)
         batch_num += 1
 
         g_batch = Flux.batch(graphs)
-        g_batch_gpu = g_batch |> Flux.gpu
+        g_batch_gpu = g_batch |> DiFoG._model_device(model)
         target_x0 = g_batch_gpu.ndata.x
 
         shape = size(target_x0)
@@ -446,7 +479,7 @@ function run_automated_pipeline(;
     if num_repeat_inference > 1 && !isnothing(last_test_graph)
         @info "Running $(num_repeat_inference) repeated inferences on instance $(last_test_instance_idx) for stability measurement..."
 
-        g_repeat_gpu = last_test_graph |> Flux.gpu
+        g_repeat_gpu = last_test_graph |> DiFoG._model_device(model)
         shape = (model.gnn.config.in_dim, g_repeat_gpu.num_nodes)   # M7
 
         s, t = edge_index(last_test_graph)
@@ -483,6 +516,24 @@ function run_automated_pipeline(;
         avg_hamming_stability = isempty(pairwise_distances) ? 0.0 : mean(pairwise_distances)
 
         @info "Repeated Inference Stability | Instance $(last_test_instance_idx) | Avg Normalized Hamming Distance across $(num_repeat_inference) runs: $(round(avg_hamming_stability, digits=4))"
+    end
+
+    # Straightness of a RectifiedFlow (depends on the model only, not on the inference schedule). Measured last,
+    # so the random streams of all other measurements are the same as without it.
+    straightness_str = "N/A"
+    if model.method isa RectifiedFlow && !isempty(straightness_graphs)
+        vals = Float64[]
+        errs = Float64[]
+        for chunk in Iterators.partition(straightness_graphs, batch_size)
+            g_s = Flux.batch(collect(chunk)) |> DiFoG._model_device(model)
+            st = DiFoG.straightness(model.method, model, g_s, (model.gnn.config.in_dim, g_s.num_nodes);
+                                    ode_steps=100)
+            append!(vals, fill(Float64(st.straightness), length(chunk)))
+            append!(errs, fill(Float64(st.one_step_error), length(chunk)))
+        end
+        straightness_str = "S = $(_fmt(mean(vals); digits=4)), one-step endpoint error = " *
+                           "$(_fmt(mean(errs); digits=4)) ($(length(vals)) test instances, 100 Euler steps)"
+        @info "Straightness | $straightness_str"
     end
 
     Flux.trainmode!(model.gnn)
@@ -524,12 +575,14 @@ function run_automated_pipeline(;
             ("Inference Steps", string(model.method.scheduler.inference_steps)),
             ("Configured / effective transitions", "$(model.method.scheduler.inference_steps) / $(length(model.method.scheduler.steps) - 1)"),
             ("Signal level at model evaluations (alpha-bar / kappa / tau)", _model_eval_signal(model.method)),
+            ("Straightness of the learned flow (lower = straighter)", straightness_str),
         ]; caption="Model configuration for run $(run_id)", label="tab:model-$(label_base)")
 
         println(io, "\\subsubsection{Training Hyperparameters}")
         write_latex_kv_table(io, [
             ("Trained Model", train_run_id),
-            ("Reflow Teacher Model", isnothing(reflow_from) ? "none" : "$reflow_from ($reflow_ode_steps Euler steps)"),
+            ("Reflow Teacher Model", isnothing(reflow_from) ? "none" :
+                "$reflow_from ($reflow_ode_steps Euler steps, $reflow_pairs_per_instance pair(s) per instance)"),
             ("Loaded pretrained model", string(model_already_exists)),
             ("Epochs", string(epochs)),
             ("Batch Size", string(batch_size)),

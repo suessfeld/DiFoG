@@ -40,6 +40,9 @@ struct DiscreteFlowMatching{S<:TimeSchedule{Float32}, K, KD} <: Diffusion
     function DiscreteFlowMatching(s::TimeSchedule, λ_cons::Real, κ::K, κ̇::KD;
                                   sampler::Symbol=:euler) where {K, KD}
         sampler in (:euler, :exact) || throw(ArgumentError("sampler must be :euler or :exact, got :$sampler"))
+        if s isa ATSSScheduler && s.path !== :flow_matching
+            @warn "DiscreteFlowMatching with an ATSS schedule fitted on the $(s.path) path, not on the mixture path (fit it with path=:flow_matching); results are a transferred grid, not an adaptive schedule for this method."
+        end
         s_float = convert(TimeSchedule{Float32}, s)
         return new{typeof(s_float), K, KD}(s_float, Float32(λ_cons), κ, κ̇, sampler)
     end

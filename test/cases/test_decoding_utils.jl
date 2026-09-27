@@ -72,14 +72,6 @@ end
     @test correction_distance(heatmap, decoded_mask; threshold=0.3f0) == 1
 end
 
-@testitem "Test heatmap_auc" setup=[TestDecodingUtils] begin
-    @test heatmap_auc(Float32[0.9, 0.8, 0.1, 0.2], [1, 1, 0, 0]) ≈ 1.0
-    @test heatmap_auc(Float32[0.1, 0.2, 0.9, 0.8], [1, 1, 0, 0]) ≈ 0.0
-    @test heatmap_auc(fill(0.5f0, 4), [1, 0, 1, 0]) ≈ 0.5           # ties → uninformative
-    @test heatmap_auc(Float32[0.9, 0.3, 0.5, 0.1], [1, 0, 0, 1]) ≈ 0.5
-    @test isnan(heatmap_auc(Float32[0.1, 0.2], [1, 1]))
-end
-
 @testitem "Test baselines on a small graph" setup=[TestDecodingUtils] begin
     using GraphNeuralNetworks
     using Random

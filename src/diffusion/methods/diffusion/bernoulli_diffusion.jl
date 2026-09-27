@@ -52,8 +52,8 @@ struct BernoulliDiffusion{S<:TimeSchedule{Int}} <: Diffusion
 
     # Accepts any schedule (Float32 schedules, e.g. ATSS, are converted to Int steps).
     function BernoulliDiffusion(s::TimeSchedule)
-        if s isa ATSSScheduler
-            @warn "BernoulliDiffusion with an ATSS schedule: ATSS is fitted on the flow-matching κ path, not on the Bernoulli forward process (ᾱ_t); results are a transferred grid, not an adaptive schedule for this method."
+        if s isa ATSSScheduler && s.path !== :diffusion
+            @warn "BernoulliDiffusion with an ATSS schedule fitted on the $(s.path) path, not on the Bernoulli forward process (fit it with path=:diffusion); results are a transferred grid, not an adaptive schedule for this method."
         end
         s_int = convert(TimeSchedule{Int}, s)
         return new{typeof(s_int)}(s_int, get_alphas(s_int.total_steps), Ref{Any}(nothing))
@@ -74,7 +74,8 @@ Parameters:
 function _alphas_like(d::BernoulliDiffusion, x::AbstractArray)
     x isa Array && return d.ᾱ
     c = d.ᾱ_cache[]
-    if c === nothing
+    # the cache must match the array type of x (a CPU view would otherwise cache a CPU copy for later GPU calls)
+    if !(c isa typeof(similar(x, Float32, 0)))
         c = copyto!(similar(x, Float32, length(d.ᾱ)), d.ᾱ)
         d.ᾱ_cache[] = c
     end

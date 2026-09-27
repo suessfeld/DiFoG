@@ -144,7 +144,7 @@ function _spawn_replay_producer!(buffer::Channel{Tuple{GNNGraph,String}}, num_in
             open(path, "r") do io
                 readline(io)  # header: "gap,bitmask"
                 for n in 0:(num_instances - 1)
-                    eof(io) && error("Seed dataset $path has fewer than $num_instances lines (stopped at$n) — check num_instances matches the file it was created with.")
+                    eof(io) && error("Seed dataset $path has fewer than $num_instances lines (stopped at $n) — check num_instances matches the file it was created with.")
                     gap_str, bitmask_str = split(readline(io), ',')
                     g = generator(rng)
                     x_0 = _parse_bitmask(bitmask_str)

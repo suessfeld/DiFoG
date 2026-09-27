@@ -140,7 +140,16 @@ end
     @test DiFoG.compute_loss(model.gnn, rf, x_t, t, gb, y, aux; symmetric=true).loss ≈
           DiFoG.compute_loss(model.gnn, rf, x_t, t, gb, y, aux; symmetric=false).loss
 
+    # several pairs per instance: every pass draws a fresh x₀ for the same graphs
+    coupling2 = generate_reflow_coupling(model, loader; ode_steps=4, pairs_per_instance=2)
+    n = length(instances)
+    @test length(coupling2) == 2n && last.(coupling2) == vcat(last.(instances), last.(instances))
+    @test coupling2[1][1].ndata.x0 != coupling2[n + 1][1].ndata.x0
+    @test_throws ArgumentError generate_reflow_coupling(model, loader; pairs_per_instance=0)
+
+    # training continues on the coupling (as the pipeline does for the 2-RF)
     optim = Flux.setup(Flux.Adam(1e-3), model.gnn)
-    losses, _, batch_losses, _ = reflow!(model, optim, loader; ode_steps=4, epochs=2, batch_size=2)
+    coupling_loader = Flux.DataLoader(coupling2; batchsize=2, shuffle=true, collate=true)
+    losses, _, batch_losses, _ = DiFoG.train_diffusion_model!(model, optim, coupling_loader; epochs=2)
     @test length(losses) == 2 && all(isfinite, batch_losses)
 end

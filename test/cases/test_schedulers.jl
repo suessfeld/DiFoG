@@ -213,6 +213,41 @@ end
     @test all(x -> 0 <= x <= total_steps, steps_int)
 end
 
+@testitem "Test ATSS on the paths of DDPM and Rectified Flow" setup=[TestSchedulers] begin
+    using Graphs
+    using Logging
+
+    total_steps = 100
+    inference_steps = 5
+    generator = BasicGraphGenerator(min_nodes=10, max_nodes=15, min_edges=20, max_edges=30)
+    solver = MaxDegSolver()
+    κ(t) = t^2
+    κ̇(t) = 2t
+
+    # κ of the Bernoulli forward process: ᾱ at diffusion time T(1 − τ), from ≈ 0 (noise) to 1 (data)
+    κ_b = DiFoG._bernoulli_kappa(total_steps)
+    @test κ_b(1f0) ≈ 1f0
+    @test κ_b(0f0) ≈ DiFoG.get_alphas(total_steps)[end]
+    @test issorted([κ_b(τ) for τ in 0f0:0.01f0:1f0])
+
+    for path in (:diffusion, :rectified_flow)
+        s = ATSSScheduler(Float32, generator, solver, total_steps, inference_steps, κ, κ̇; path=path)
+        @test s.path === path
+        @test length(s) == inference_steps + 1
+        @test s.steps[1] == 0f0 && s.steps[end] == 1f0 && issorted(s.steps)
+        @test convert(TimeSchedule{Int}, s).path === path          # the conversion keeps the path
+    end
+    @test ATSSScheduler(Float32, generator, solver, total_steps, inference_steps, κ, κ̇).path === :flow_matching
+    @test_throws ArgumentError ATSSScheduler(Float32, generator, solver, total_steps, inference_steps, κ, κ̇; path=:foo)
+
+    # a method only warns when the grid was fitted on another method's path
+    s_ddpm = ATSSScheduler(Float32, generator, solver, total_steps, inference_steps, κ, κ̇; path=:diffusion)
+    @test_logs min_level=Logging.Warn BernoulliDiffusion(s_ddpm)
+    @test_logs (:warn,) match_mode=:any DiscreteFlowMatching(s_ddpm, 0.1f0, κ, κ̇)
+    s_rf = ATSSScheduler(Float32, generator, solver, total_steps, inference_steps, κ, κ̇; path=:rectified_flow)
+    @test_logs min_level=Logging.Warn RectifiedFlow(s_rf)
+end
+
 @testitem "Test ATSS Scheduler Lambda Inverse Logic" setup=[TestSchedulers] begin
     κ(t) = t
 
