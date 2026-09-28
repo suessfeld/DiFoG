@@ -87,3 +87,26 @@ end
         end
     end
 end
+
+@testitem "Test LNSSolver with an iteration limit" begin
+    using Graphs
+    using Random
+
+    # a time or an iteration limit is required
+    @test_throws ArgumentError LNSSolver(MaxCutSolver(); ttime=-1)
+    s = LNSSolver(MaxCutSolver(); ttime=-1, titer=200, n_iter_repair=1)
+    @test s.ttime < 0 && s.titer == 200
+
+    # the configuration is part of the dataset file name, paper defaults keep the old names
+    @test dataset_tag(LNSSolver(MaxCutSolver())) == "lns"
+    @test dataset_tag(s) == "lns_r1_it200"
+    @test dataset_tag(LNSSolver(MISPSolver(); ttime=-1, titer=500, n_iter_repair=1, init=:greedy)) == "lnsgreedy_r1_it500"
+
+    # an iteration limit gives the same label on every run (seeded per instance, independent of the machine speed)
+    g = ERGraphGenerator(min_nodes=60, max_nodes=60, p=0.2)(Random.Xoshiro(3))
+    x1, gap = s(g)
+    x2, _ = s(g)
+    @test isnan(gap) && x1 == x2
+    _, _, iters = DiFoG._run_lns(s, g)
+    @test iters >= 200
+end

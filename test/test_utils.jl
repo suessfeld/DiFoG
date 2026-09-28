@@ -162,6 +162,8 @@ Parameters:
     - 'comparison_solver': Optional second solver that labels the same test instances (same seed, hence the same
       graphs; e.g. Gurobi next to an `LNSSolver` reference). Its objective values are compared with the
       reference instance by instance and written to the report. `nothing` = no comparison.
+    - 'comparison_solvers': Further comparison solvers on the same test instances (e.g. the other LNS variant),
+      reported as "Comparison 2 …", "Comparison 3 …" after `comparison_solver`.
 
 Returns the report path, or `nothing` when `evaluate=false`.
 """
@@ -187,7 +189,8 @@ function run_automated_pipeline(;
     reflow_ode_steps::Int = 100,
     reflow_pairs_per_instance::Int = 1,
     straightness_instances::Int = 20,
-    comparison_solver::Union{Nothing,ProblemSolver} = nothing
+    comparison_solver::Union{Nothing,ProblemSolver} = nothing,
+    comparison_solvers::AbstractVector = ProblemSolver[]
 )
     @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
     seeds_dir = joinpath(result_root, "seeds")
@@ -466,9 +469,10 @@ function run_automated_pipeline(;
     mean_gap = _mean_or_nan(finite_gaps)
     max_gap = isempty(finite_gaps) ? NaN : maximum(finite_gaps)
 
-    comparison = isnothing(comparison_solver) ? nothing :
-        _comparison_stats(comparison_solver, solver, generator, num_test, test_seed, seeds_dir,
-                          test_graph_sizes, per_instance_true_scores)
+    all_comparison_solvers = vcat(isnothing(comparison_solver) ? ProblemSolver[] : ProblemSolver[comparison_solver],
+                                  collect(ProblemSolver, comparison_solvers))
+    comparisons = [_comparison_stats(cs, solver, generator, num_test, test_seed, seeds_dir,
+                                     test_graph_sizes, per_instance_true_scores) for cs in all_comparison_solvers]
 
 
     @info "Testing Complete. Avg Model Score: $(round(avg_model_score, digits=2)) | Avg Reference Score: $(round(avg_true_score, digits=2)) | Mean per-instance ratio vs. reference: $(round(performance_pct, digits=2))% ± $(round(approx_ratio_ci95, digits=2))% (95% CI) | Greedy baseline: $(round(greedy_pct, digits=2))% | Avg Inference Time: $(round(avg_inference_time_per_instance, digits=4))s/instance"
@@ -611,14 +615,16 @@ function run_automated_pipeline(;
             ("Total Inference Time (s)", string(round(total_inference_time, digits=4))),
             ("Avg Inference Time / Instance (s)", string(round(avg_inference_time_per_instance, digits=4))),
         ]
-        if !isnothing(comparison)
+        for (ci, comp) in enumerate(comparisons)
+            # the first comparison keeps the original keys (older reports), further ones are numbered
+            c = ci == 1 ? "Comparison" : "Comparison $ci"
             append!(results_rows, [
-                ("Comparison Solver", comparison.label),
-                ("Comparison Objective, Mean ± Std", _obj_stats(comparison.scores)),
-                ("Comparison vs. Reference, Mean Per-Instance Ratio (%)",
-                 "$(_fmt(comparison.ratio; digits=2)) ± $(_fmt(comparison.ci95; digits=2))"),
-                ("Comparison Solutions Optimal within MIPGap 1e-4 (fraction)", _fmt(comparison.frac_optimal)),
-                ("Comparison Solution Mean Gap", _fmt(comparison.mean_gap; digits=6)),
+                ("$c Solver", comp.label),
+                ("$c Objective, Mean ± Std", _obj_stats(comp.scores)),
+                ("$c vs. Reference, Mean Per-Instance Ratio (%)",
+                 "$(_fmt(comp.ratio; digits=2)) ± $(_fmt(comp.ci95; digits=2))"),
+                ("$c Solutions Optimal within MIPGap 1e-4 (fraction)", _fmt(comp.frac_optimal)),
+                ("$c Solution Mean Gap", _fmt(comp.mean_gap; digits=6)),
             ])
         end
         write_latex_kv_table(io, results_rows; caption="Results and performance metrics for run $(run_id)", label="tab:results-$(label_base)")

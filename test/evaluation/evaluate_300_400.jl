@@ -129,7 +129,8 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
                        solver::ProblemSolver, evaluate::Bool=true,
                        reflow_from::Union{Nothing,String}=nothing, reflow_ode_steps::Int=100,
                        reflow_pairs_per_instance::Int=1,
-                       comparison_solver::Union{Nothing,ProblemSolver}=nothing)
+                       comparison_solver::Union{Nothing,ProblemSolver}=nothing,
+                       comparison_solvers::AbstractVector=ProblemSolver[])
 
     if scheduler_name == "atss"
         seed_everything!("atss:" * run_id)
@@ -163,6 +164,7 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
         reflow_ode_steps = reflow_ode_steps,
         reflow_pairs_per_instance = reflow_pairs_per_instance,
         comparison_solver = comparison_solver,
+        comparison_solvers = comparison_solvers,
     )
 end
 
@@ -228,6 +230,10 @@ function main()
                                                  MaxCutSolver(time_limit=solver_time_limit)
         solver = use_lns_labels ? LNSSolver(exact_solver; ttime=lns_time_limit, init=lns_init) : exact_solver
         comparison_solver = use_lns_labels ? exact_solver : nothing
+        # the other LNS variant on the same test instances (LNS-rand vs. LNS-greedy in the tables)
+        comparison_solvers = use_lns_labels ?
+            ProblemSolver[LNSSolver(exact_solver; ttime=lns_time_limit, init=(lns_init === :greedy ? :random : :greedy))] :
+            ProblemSolver[]
         s = seeds[problem_name]
         split_seeds = (; training_seed = s.training, test_seed = s.test, validation_seed = s.validation)
 
@@ -278,6 +284,7 @@ function main()
                         solver = solver,
                         reflow_from = reflow_from,
                         comparison_solver = comparison_solver,
+                        comparison_solvers = comparison_solvers,
                     )
                 catch e
                     @error "Evaluation $run_id FAILED — logging and continuing with the next combination." exception=(e, catch_backtrace())
