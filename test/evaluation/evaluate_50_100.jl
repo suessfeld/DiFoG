@@ -173,11 +173,15 @@ function main()
 
     # ---- Fixed across the entire grid ----
     generator = ERGraphGenerator(min_nodes=50, max_nodes=100, p=0.15)
-    solver_time_limit = 60.0                   # Gurobi time limit (labels without LNS, or the comparison)
-    # Labels: LNS-rand of Bresich et al. (<seed>_lns.csv), with Gurobi (<seed>.csv) as comparison on the test
-    # instances; false = Gurobi labels (<seed>.csv) as before, without comparison.
-    use_lns_labels = false                     # ER-50-100: Gurobi solves (nearly) all instances optimally
-    lns_time_limit = 3.0                       # LNS run time per instance (paper: 3 s)
+    # Labels and reference: one solver per distribution, the one with the better solutions on average: Gurobi on
+    # ER-50-100 (solves the instances exactly or nearly so), the LNS on the larger distributions. The other solver
+    # labels the test instances as comparison. The LNS is LNS-rand of Bresich et al. with a single random repair per
+    # iteration (r = 1) and an iteration limit instead of a time limit, so its labels do not depend on the machine;
+    # 10^5 iterations are converged on all distributions (test/helpers/lns_calibration.jl).
+    reference = :gurobi                        # :gurobi or :lns
+    solver_time_limit = 10.0                   # Gurobi time limit (1 thread, conan)
+    lns_iterations = 100_000                   # LNS iteration limit
+    lns_repairs = 1                            # random repairs per LNS iteration (paper: 2000 MIS / 1000 MaxCut)
     # in_dim = node state width (1), time_dim = timestep embedding width (32); same weights as the old in_dim=33
     gnn_config = GNNConfig(num_layers=12, in_dim=1, time_dim=32, hidden_dim=256, output_dim=1)
     total_steps = 1000
@@ -197,8 +201,8 @@ function main()
 
     # ---- Seeds: one triple per PROBLEM ----
     seeds = Dict(
-        "misp"   => (training = 5010001, test = 5010002, validation = 5010003),
-        "maxcut" => (training = 5010004, test = 5010005, validation = 5010006),
+        "misp"   => (training = 5010011, test = 5010012, validation = 5010013),
+        "maxcut" => (training = 5010014, test = 5010015, validation = 5010016),
     )
 
     # ---- The grid ----
@@ -225,12 +229,10 @@ function main()
     for problem_name in problems
         exact_solver = problem_name == "misp" ? MISPSolver(time_limit=solver_time_limit) :
                                                  MaxCutSolver(time_limit=solver_time_limit)
-        solver = use_lns_labels ? LNSSolver(exact_solver; ttime=lns_time_limit) : exact_solver
-        comparison_solver = use_lns_labels ? exact_solver : nothing
-        # both LNS variants on the same test instances (reference: Gurobi), for the comparison in the tables
-        comparison_solvers = use_lns_labels ? ProblemSolver[] :
-            ProblemSolver[LNSSolver(exact_solver; ttime=lns_time_limit, init=:random),
-                          LNSSolver(exact_solver; ttime=lns_time_limit, init=:greedy)]
+        lns_solver = LNSSolver(exact_solver; ttime=-1, titer=lns_iterations, n_iter_repair=lns_repairs)
+        solver = reference === :lns ? lns_solver : exact_solver
+        comparison_solver = reference === :lns ? exact_solver : lns_solver   # the other solver, on the test set
+        comparison_solvers = ProblemSolver[]
         s = seeds[problem_name]
         split_seeds = (; training_seed = s.training, test_seed = s.test, validation_seed = s.validation)
 

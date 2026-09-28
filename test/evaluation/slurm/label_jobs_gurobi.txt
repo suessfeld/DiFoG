@@ -1,0 +1,10 @@
+julia --project=. test/evaluation/create_dataset.jl maxcut 50 100 0.15 5010014 10000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl misp 50 100 0.15 5010011 10000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl maxcut 700 800 0.15 70080015 1000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl misp 700 800 0.15 70080012 1000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040015 1000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl misp 300 400 0.15 30040012 1000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl maxcut 50 100 0.15 5010015 1000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl misp 50 100 0.15 5010012 1000 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl maxcut 50 100 0.15 5010016 500 gurobi 10
+julia --project=. test/evaluation/create_dataset.jl misp 50 100 0.15 5010013 500 gurobi 10

@@ -173,15 +173,15 @@ function main()
 
     # ---- Fixed across the entire grid ----
     generator = ERGraphGenerator(min_nodes=700, max_nodes=800, p=0.15)
-    solver_time_limit = 60.0                   # Gurobi time limit (labels without LNS, or the comparison)
-    # Labels: LNS of Bresich et al., with Gurobi (<seed>.csv) as comparison on the test instances;
-    # false = Gurobi labels (<seed>.csv) as before, without comparison.
-    use_lns_labels = true
-    lns_time_limit = 3.0                       # LNS run time per instance (paper: 3 s)
-    # LNS start: :random = LNS-rand (<seed>_lns.csv), :greedy = start from the degree greedy (<seed>_lnsgreedy.csv).
-    # :greedy on ER-700-800: within 3 s, LNS-rand stays below the degree greedy on MaxCut (97.5 % of it on 5
-    # training instances), the greedy start is above it on both problems
-    lns_init = :greedy
+    # Labels and reference: one solver per distribution, the one with the better solutions on average: Gurobi on
+    # ER-50-100 (solves the instances exactly or nearly so), the LNS on the larger distributions. The other solver
+    # labels the test instances as comparison. The LNS is LNS-rand of Bresich et al. with a single random repair per
+    # iteration (r = 1) and an iteration limit instead of a time limit, so its labels do not depend on the machine;
+    # 10^5 iterations are converged on all distributions (test/helpers/lns_calibration.jl).
+    reference = :lns                        # :gurobi or :lns
+    solver_time_limit = 10.0                   # Gurobi time limit (1 thread, conan)
+    lns_iterations = 100_000                   # LNS iteration limit
+    lns_repairs = 1                            # random repairs per LNS iteration (paper: 2000 MIS / 1000 MaxCut)
     # in_dim = node state width (1), time_dim = timestep embedding width (32); same weights as the old in_dim=33
     gnn_config = GNNConfig(num_layers=12, in_dim=1, time_dim=32, hidden_dim=256, output_dim=1)
     total_steps = 1000
@@ -192,8 +192,8 @@ function main()
     reflow_ode_steps = 100                     # Euler steps generating the Reflow coupling
     reflow_pairs_per_instance = 1              # (x₀, Z₁) pairs per training instance, each with a fresh x₀
 
-    num_train = 1000
-    num_test = 100
+    num_train = 10000
+    num_test = 1000
     epochs = 5
     batch_size = 1
     learning_rate = 0.001
@@ -201,8 +201,8 @@ function main()
 
     # ---- Seeds: one triple per PROBLEM ----
     seeds = Dict(
-        "misp"   => (training = 70080001, test = 70080002, validation = 70080003),
-        "maxcut" => (training = 70080004, test = 70080005, validation = 70080006),
+        "misp"   => (training = 70080011, test = 70080012, validation = 70080013),
+        "maxcut" => (training = 70080014, test = 70080015, validation = 70080016),
     )
 
     # ---- The grid ----
@@ -229,12 +229,10 @@ function main()
     for problem_name in problems
         exact_solver = problem_name == "misp" ? MISPSolver(time_limit=solver_time_limit) :
                                                  MaxCutSolver(time_limit=solver_time_limit)
-        solver = use_lns_labels ? LNSSolver(exact_solver; ttime=lns_time_limit, init=lns_init) : exact_solver
-        comparison_solver = use_lns_labels ? exact_solver : nothing
-        # the other LNS variant on the same test instances (LNS-rand vs. LNS-greedy in the tables)
-        comparison_solvers = use_lns_labels ?
-            ProblemSolver[LNSSolver(exact_solver; ttime=lns_time_limit, init=(lns_init === :greedy ? :random : :greedy))] :
-            ProblemSolver[]
+        lns_solver = LNSSolver(exact_solver; ttime=-1, titer=lns_iterations, n_iter_repair=lns_repairs)
+        solver = reference === :lns ? lns_solver : exact_solver
+        comparison_solver = reference === :lns ? exact_solver : lns_solver   # the other solver, on the test set
+        comparison_solvers = ProblemSolver[]
         s = seeds[problem_name]
         split_seeds = (; training_seed = s.training, test_seed = s.test, validation_seed = s.validation)
 
