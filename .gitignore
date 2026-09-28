@@ -43,6 +43,8 @@ results/results_700_800/instances
 results/results_700_800/models
 results/results_700_800/reports
 
+/seeds
+
 /test/evaluation/evaluate_single.jl
 
 /.vscode
