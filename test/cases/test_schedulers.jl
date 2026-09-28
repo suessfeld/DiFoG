@@ -280,7 +280,7 @@ end
 end
 
 @testitem "Test ATSS Int conversion maps progress to diffusion time (C3)" setup=[TestSchedulers] begin
-    s_float = DiFoG.ATSSScheduler{Float32}(100, 3, Float32[0, 0.1, 0.95, 1], t -> t, t -> 1f0, 0.5f0)
+    s_float = DiFoG.ATSSScheduler{Float32}(100, 3, Float32[0, 0.1, 0.95, 1], t -> t, t -> 1f0, 0.5f0, :flow_matching)
     s_int = convert(TimeSchedule{Int}, s_float)
     @test s_int.steps == [0, 5, 90, 100]              # t = T(1 − τ), sorted ascending
     back = convert(TimeSchedule{Float32}, s_int)

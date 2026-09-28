@@ -29,6 +29,7 @@ struct GNNConfig
         @assert num_layers >= 1 "num_layers must be ≥ 1"
         @assert in_dim >= 1 "in_dim (node state width) must be ≥ 1"
         @assert time_dim >= 2 "time_dim must be ≥ 2"
+        @assert output_dim == 1 "output_dim must be 1 (one logit per node; the losses assume a (1, N) output)"
         return new(num_layers, in_dim, time_dim, hidden_dim, output_dim)
     end
 end

@@ -8,7 +8,7 @@
 # `Xoshiro(seed)` by the same generator, as in `create_dataset`. The ILP is the same one used for the labels.
 #
 # Usage:
-#   julia --project=. test/evaluation/gurobi_convergence.jl <problem> <min_n> <max_n> <p> <seed> \
+#   julia --project=. test/helpers/gurobi_convergence.jl <problem> <min_n> <max_n> <p> <seed> \
 #         <first_idx> <last_idx> <time_limit_s> <outdir>
 #   problem ∈ {maxcut, misp}; Gurobi threads = $SLURM_CPUS_PER_TASK ÷ 2 (one per physical core), at least 1,
 #   overridable with $GRB_THREADS.

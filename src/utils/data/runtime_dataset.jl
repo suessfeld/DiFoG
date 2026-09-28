@@ -92,6 +92,10 @@ Fields:
     - 'path': The file path to the underlying CSV dataset.
     - 'buffer': An asynchronous channel buffering generated graph-label pairs.
     - 'producer': A reference to the background task filling the buffer.
+    - 'shuffle': Whether every pass yields the instances in a new random order.
+    - 'order_rng': The RNG drawing the order of each pass (seeded at construction from the global RNG).
+    - 'states': For shuffling: the generator RNG state before each instance, so any instance can be regenerated.
+    - 'lines': For shuffling: the label lines ("gap,bitmask") of all instances.
 """
 struct RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
     num_instances::Int
@@ -101,6 +105,10 @@ struct RuntimeDataset{G<:GraphGenerator, P<:ProblemSolver}
     path::String
     buffer::Channel{Tuple{GNNGraph,String}}
     producer::Base.RefValue{Task}
+    shuffle::Bool
+    order_rng::Random.Xoshiro
+    states::Vector{Random.Xoshiro}
+    lines::Vector{String}
 end
 
 """
@@ -145,12 +153,8 @@ function _spawn_replay_producer!(buffer::Channel{Tuple{GNNGraph,String}}, num_in
                 readline(io)  # header: "gap,bitmask"
                 for n in 0:(num_instances - 1)
                     eof(io) && error("Seed dataset $path has fewer than $num_instances lines (stopped at $n) — check num_instances matches the file it was created with.")
-                    gap_str, bitmask_str = split(readline(io), ',')
-                    g = generator(rng)
-                    x_0 = _parse_bitmask(bitmask_str)
-                    gnn_g = GNNGraph(g, ndata=(; x=x_0), gdata=(; gap=Float32[_parse_gap(gap_str)]))
-
-                    put!(buffer, (normalize_graph(gnn_g), "seed_$(seed)_inst_$(n).txt"))
+                    g = _instance_graph(generator, rng, readline(io), path, n + 1)
+                    put!(buffer, (g, "seed_$(seed)_inst_$(n).txt"))
                 end
             end
         catch e
@@ -162,9 +166,50 @@ function _spawn_replay_producer!(buffer::Channel{Tuple{GNNGraph,String}}, num_in
 end
 
 """
-    RuntimeDataset(num_instances::Int, generator::G, solver::P, seed::Integer, filepath::AbstractString; buffer_capacity::Int=32) where {G<:GraphGenerator, P<:ProblemSolver}
+    _instance_graph(generator, rng, line, path, k)
+
+Regenerates instance `k` from the generator RNG `rng` (positioned before that instance) and attaches its label line.
+"""
+function _instance_graph(generator::GraphGenerator, rng, line::AbstractString, path::AbstractString, k::Int)
+    gap_str, bitmask_str = split(line, ',')
+    g = generator(rng)
+    # S5: a label that does not fit its replayed graph (other generator, truncated line) fails here
+    length(bitmask_str) == nv(g) ||
+        error("Seed dataset $path, instance $k: bitmask length $(length(bitmask_str)) ≠ nv(g) = $(nv(g)) — dataset and generator do not match.")
+    gnn_g = GNNGraph(g, ndata=(; x=_parse_bitmask(bitmask_str)), gdata=(; gap=Float32[_parse_gap(gap_str)]))
+    return normalize_graph(gnn_g)
+end
+
+"""
+    _spawn_shuffled_producer!(buffer, order, states, lines, generator, seed, path)
+
+Spawns a background task that yields the instances in the given order, regenerating each graph from its stored
+generator RNG state (the same graphs as the sequential replay, without holding them in memory).
+"""
+function _spawn_shuffled_producer!(buffer::Channel{Tuple{GNNGraph,String}}, order::Vector{Int},
+                                   states::Vector{Random.Xoshiro}, lines::Vector{String},
+                                   generator::GraphGenerator, seed::Integer, path::AbstractString)
+    return Threads.@spawn begin
+        try
+            for k in order
+                g = _instance_graph(generator, copy(states[k]), lines[k], path, k)
+                put!(buffer, (g, "seed_$(seed)_inst_$(k - 1).txt"))
+            end
+        catch e
+            @error "Shuffled dataset producer crashed — closing the buffer so consumers fail instead of waiting." exception=(e, catch_backtrace())
+            close(buffer, e isa Exception ? e : ErrorException(string(e)))
+            rethrow()
+        end
+    end
+end
+
+"""
+    RuntimeDataset(num_instances::Int, generator::G, solver::P, seed::Integer, filepath::AbstractString; buffer_capacity::Int=32, shuffle::Bool=false) where {G<:GraphGenerator, P<:ProblemSolver}
 
 Constructs a new RuntimeDataset, initializing the CSV backing file if necessary and spawning the initial producer task.
+With `shuffle = true`, every pass (the first one and each after `reset!`) yields the instances in a new random order
+(as the training loaders of DIFUSCO/EFLOCO); the order is drawn from an RNG seeded from the global RNG at
+construction, so it is reproducible under `seed_everything!`.
 
 Parameters:
     - 'num_instances': The number of instances in the set.
@@ -173,13 +218,32 @@ Parameters:
     - 'seed': The RNG seed identifying the dataset.
     - 'filepath': The directory path for the dataset CSV file.
     - 'buffer_capacity': The prefetch buffer size for the channel (default is 32).
+    - 'shuffle': Whether every pass yields the instances in a new random order.
 """
 function RuntimeDataset(num_instances::Int, generator::G, solver::P, seed::Integer, filepath::AbstractString;
-                         buffer_capacity::Int=32) where {G<:GraphGenerator, P<:ProblemSolver}
+                         buffer_capacity::Int=32, shuffle::Bool=false) where {G<:GraphGenerator, P<:ProblemSolver}
     path = create_dataset(seed, filepath, generator, solver, num_instances)
     buffer = Channel{Tuple{GNNGraph,String}}(buffer_capacity)
-    task = _spawn_replay_producer!(buffer, num_instances, generator, seed, path)
-    return RuntimeDataset(num_instances, generator, solver, UInt64(seed), path, buffer, Ref(task))
+    # only a shuffling dataset draws from the global RNG, so the random streams of the others are unchanged
+    order_rng = shuffle ? Random.Xoshiro(rand(UInt64)) : Random.Xoshiro(0)
+    states = Random.Xoshiro[]
+    lines = String[]
+    if shuffle
+        # one pass over the generator: remember its RNG state before every instance (32 bytes each)
+        rng = Random.Xoshiro(seed)
+        for _ in 1:num_instances
+            push!(states, copy(rng))
+            generator(rng)
+        end
+        lines = collect(Iterators.take(Iterators.drop(eachline(path), 1), num_instances))
+        length(lines) == num_instances ||
+            error("Seed dataset $path has fewer than $num_instances lines — check num_instances.")
+        task = _spawn_shuffled_producer!(buffer, randperm(order_rng, num_instances), states, lines, generator, seed, path)
+    else
+        task = _spawn_replay_producer!(buffer, num_instances, generator, seed, path)
+    end
+    return RuntimeDataset(num_instances, generator, solver, UInt64(seed), path, buffer, Ref(task),
+                          shuffle, order_rng, states, lines)
 end
 
 """
@@ -205,8 +269,10 @@ function reset!(dataset::RuntimeDataset)
         take!(dataset.buffer); drained += 1
     end
     drained > 0 && @warn "reset!: discarded $drained unconsumed instances of the previous (aborted) pass."
-    dataset.producer[] = _spawn_replay_producer!(dataset.buffer, dataset.num_instances,
-                                                 dataset.generator, dataset.seed, dataset.path)
+    dataset.producer[] = dataset.shuffle ?
+        _spawn_shuffled_producer!(dataset.buffer, randperm(dataset.order_rng, dataset.num_instances), dataset.states,
+                                  dataset.lines, dataset.generator, dataset.seed, dataset.path) :
+        _spawn_replay_producer!(dataset.buffer, dataset.num_instances, dataset.generator, dataset.seed, dataset.path)
     return dataset
 end
 

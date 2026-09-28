@@ -129,7 +129,7 @@ end
     @test all(0f0 .< gc.ndata.x .< 1f0)   # soft labels from the :x1 endpoint
 
     # the stored Z₁ is exactly the ODE endpoint of the stored x₀ (same batch composition as during
-    # generation: BatchNorm(track_stats=false) normalizes with the statistics of the current batch)
+    # generation)
     gb = Flux.batch(first.(coupling)[1:4])
     z1 = DiFoG.integrate(rf, model, gb.ndata.x0, gb, DiFoG._uniform_grid(8))
     @test gb.ndata.x ≈ (z1 .+ 1f0) ./ 2f0

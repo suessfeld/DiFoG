@@ -132,3 +132,21 @@ end
     @test size(p_post) == size(x_t |> Flux.cpu)
     @test all(x -> 0.0f0 <= x <= 1.0f0, p_post)
 end
+
+@testitem "AGNN output of a graph does not depend on the co-batched graphs (LayerNorm)" begin
+    using Flux
+    using GraphNeuralNetworks
+    using Random
+
+    Random.seed!(3)
+    cfg = GNNConfig(num_layers=3, in_dim=1, time_dim=8, hidden_dim=16, output_dim=1)
+    gnn = AGNN(cfg)
+    gen = ERGraphGenerator(min_nodes=8, max_nodes=12, p=0.4)
+    graphs = [DiFoG.normalize_graph(GNNGraph(gen(Random.Xoshiro(k)))) for k in 1:3]
+    xs = [rand(Float32, 1, g.num_nodes) for g in graphs]
+    ts = [10, 500, 900]                                   # different noise levels in one batch, as in training
+
+    alone = gnn(graphs[1], xs[1], DiFoG.get_timestep_embedding([ts[1]], cfg.time_dim))
+    batched = gnn(Flux.batch(graphs), hcat(xs...), DiFoG.get_timestep_embedding(ts, cfg.time_dim))
+    @test batched[:, 1:graphs[1].num_nodes] ≈ alone atol=1f-5
+end

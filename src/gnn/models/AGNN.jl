@@ -6,23 +6,29 @@ using Zygote: ignore_derivatives
 
 export AGNN
 
+# Normalization: LayerNorm (per node / edge over its features), as in the reference implementation of DIFUSCO and
+# EFLOCO (GNNEncoder with the default norm="layer"), although the DIFUSCO paper names BatchNorm. BatchNorm would
+# normalize over the whole batch, whose graphs are at different noise levels during training (one t per graph)
+# but at one shared level during inference, and would make the results depend on the batch size and on the
+# co-batched graphs.
+
 """
     OutputHead
 
-Final node-wise prediction head applying batch normalization, ReLU activation, and a dense layer.
+Final node-wise prediction head applying layer normalization, ReLU activation, and a dense layer.
 
 Fields:
-    - 'bn': The batch normalization layer.
+    - 'norm': The layer normalization.
     - 'linear': The dense layer for output projection.
 """
 struct OutputHead
-    bn     :: BatchNorm
+    norm   :: LayerNorm
     linear :: Dense
 end
 Flux.@layer OutputHead
 
 OutputHead(d::Int, output_dim::Int) = OutputHead(
-    BatchNorm(d, track_stats=false),
+    LayerNorm(d),
     Dense(d, output_dim)
 )
 
@@ -35,7 +41,7 @@ Parameters:
     - 'm': The OutputHead instance.
     - 'h': The hidden node features matrix.
 """
-(m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.bn(h)))
+(m::OutputHead)(h::AbstractMatrix) = m.linear(relu.(m.norm(h)))
 
 """
     AGNNLayer
@@ -48,8 +54,8 @@ Fields:
     - 'A': Dense layer for edge feature computation (source).
     - 'B': Dense layer for edge feature computation (target).
     - 'C': Dense layer for edge feature computation (edge).
-    - 'norm_h': Batch normalization for node features.
-    - 'norm_e': Batch normalization for edge features.
+    - 'norm_h': Layer normalization for node features.
+    - 'norm_e': Layer normalization for edge features.
     - 'mlp_e': Multi-layer perceptron for final edge feature update.
 """
 struct AGNNLayer
@@ -58,8 +64,8 @@ struct AGNNLayer
     A      :: Dense
     B      :: Dense
     C      :: Dense
-    norm_h :: BatchNorm
-    norm_e :: BatchNorm
+    norm_h :: LayerNorm
+    norm_e :: LayerNorm
     mlp_e  :: Chain
 end
 Flux.@layer AGNNLayer
@@ -70,8 +76,8 @@ AGNNLayer(d::Int) = AGNNLayer(
     Dense(d, d),
     Dense(d, d),
     Dense(d, d),
-    BatchNorm(d, track_stats=false),
-    BatchNorm(d, track_stats=false),
+    LayerNorm(d),
+    LayerNorm(d),
     Chain(Dense(d, d, relu), Dense(d, d)),
 )
 

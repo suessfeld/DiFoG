@@ -169,6 +169,7 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
 end
 
 function main()
+    DiFoG.GRB_THREADS[] = 1                    # S12: Gurobi labels/comparisons with 1 thread, independent of the machine
     result_root = "/home/e12023149/thesis/results/results_700_800"
 
     # ---- Fixed across the entire grid ----

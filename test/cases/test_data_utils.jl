@@ -50,3 +50,36 @@ end
 
     @test g_norm.ndata.x == g.ndata.x
 end
+@testitem "Test RuntimeDataset shuffling (new order per pass, same instances)" begin
+    using GraphNeuralNetworks
+    using Random
+
+    dir = mktempdir()
+    generator = ERGraphGenerator(min_nodes=12, max_nodes=18, p=0.3)
+    solver = LNSSolver(MaxCutSolver(); ttime=-1, titer=20, n_iter_repair=1)
+    n = 12
+    seq = RuntimeDataset(n, generator, solver, 11, dir)
+    seq_items = [seq[i] for i in 1:n]
+
+    Random.seed!(1)
+    shuf = RuntimeDataset(n, generator, solver, 11, dir; shuffle=true)
+    pass1 = [shuf[i] for i in 1:n]
+    DiFoG.reset!(shuf)
+    pass2 = [shuf[i] for i in 1:n]
+
+    by_name = Dict(name => g for (g, name) in seq_items)
+    for pass in (pass1, pass2)
+        @test sort(last.(pass)) == sort(last.(seq_items))                  # the same instances
+        for (g, name) in pass                                              # and exactly the same graphs and labels
+            @test g.num_nodes == by_name[name].num_nodes && g.num_edges == by_name[name].num_edges
+            @test g.ndata.x == by_name[name].ndata.x
+        end
+    end
+    @test last.(pass1) != last.(pass2)                                     # a new order per pass
+    @test last.(pass1) != last.(seq_items)
+
+    # reproducible under the same global seed
+    Random.seed!(1)
+    shuf2 = RuntimeDataset(n, generator, solver, 11, dir; shuffle=true)
+    @test last.([shuf2[i] for i in 1:n]) == last.(pass1)
+end

@@ -208,6 +208,11 @@ function run_automated_pipeline(;
     train_meta = Dict{String,String}(
         "solver" => string(solver),
         "method" => _method_label(model.method),
+        # S11: settings that change the trained model but are not part of the method label
+        "kappa" => model.method isa DiscreteFlowMatching ?
+                   string(round.(model.method.κ.(Float32[0.25, 0.5, 0.75]); sigdigits=4)) : "n/a",
+        "generator" => string(generator),
+        "gnn_config" => string(model.gnn.config),
         "total_steps" => string(model.method.scheduler.total_steps),
         "num_train" => string(num_train),
         "training_seed" => string(training_seed),
@@ -218,8 +223,8 @@ function run_automated_pipeline(;
         "batch_size" => string(batch_size),
         "learning_rate" => string(learning_rate),
     )
-    strict_meta_keys = ["solver", "method", "total_steps", "num_train", "training_seed", "reflow_from",
-                        "reflow_coupling"]
+    strict_meta_keys = ["solver", "method", "kappa", "generator", "gnn_config", "total_steps", "num_train",
+                        "training_seed", "reflow_from", "reflow_coupling"]
 
     final_train_loss = NaN
     final_val_loss = NaN
@@ -246,7 +251,7 @@ function run_automated_pipeline(;
         end
 
         @info "Initializing Train dataset..."
-        train_dataset = RuntimeDataset(num_train, generator, solver, training_seed, seeds_dir)
+        train_dataset = RuntimeDataset(num_train, generator, solver, training_seed, seeds_dir; shuffle=true)   # S13: new order every epoch
         train_loader = Flux.DataLoader(train_dataset, batchsize=batch_size, shuffle=false, collate=true)
 
         if !isnothing(reflow_from)
@@ -254,7 +259,9 @@ function run_automated_pipeline(;
             teacher_path = joinpath(models_dir, "model-$reflow_from.jld2")
             isfile(teacher_path) || error("Reflow teacher model '$reflow_from' not found at $teacher_path — train it first.")
             @info "Reflow: warm-starting from $teacher_path and generating its coupling ($(reflow_ode_steps) Euler steps, $(reflow_pairs_per_instance) pair(s) per instance)..."
-            DiFoG.load_model!(model, teacher_path)
+            # the teacher is the 1-RF of the same configuration, trained on the labels (no coupling)
+            teacher_meta = merge(train_meta, Dict("reflow_from" => "none", "reflow_coupling" => "none"))
+            DiFoG.load_model!(model, teacher_path; expected_meta=teacher_meta, strict_keys=strict_meta_keys)
             coupling = DiFoG.generate_reflow_coupling(model, train_loader; ode_steps=reflow_ode_steps,
                                                       pairs_per_instance=reflow_pairs_per_instance)
             train_loader = Flux.DataLoader(coupling, batchsize=batch_size, shuffle=true, collate=true)
@@ -296,8 +303,23 @@ function run_automated_pipeline(;
         return nothing
     end
 
-    # Evaluation randomness (sampler noise) depends only on run_id.
-    seed_everything!("eval:" * run_id)
+    # S7: compile the sampler for this model, method and schedule type before the first timed call (otherwise the
+    # compilation lands in the timing of the first cell, typically the 1-step cell). Uses a separately generated
+    # graph (reading the test set here would consume its stream) and runs before the evaluation seeding, so the
+    # sampler noise of the evaluation is unchanged.
+    Flux.testmode!(model.gnn)
+    let g = generator(Random.Xoshiro(0))
+        g_w = GNNGraph(g)
+        g_w = Flux.batch([DiFoG.normalize_graph(GNNGraph(g_w; ndata=(; x=zeros(Float32, 1, g_w.num_nodes))))])
+        g_w = g_w |> DiFoG._model_device(model)
+        DiFoG.sample_heatmap(model.method, model, (model.gnn.config.in_dim, g_w.num_nodes), g_w)
+        DiFoG._sync_device()
+    end
+
+    # Evaluation randomness (sampler noise) depends only on the trained model (S8: common random numbers), so all
+    # schedules and step counts of one model are evaluated with the same noise stream and their differences are not
+    # dominated by independent sampling noise.
+    seed_everything!("eval:" * train_run_id)
 
     num_params = sum(length, Flux.trainables(model.gnn))
 
@@ -640,7 +662,7 @@ function run_automated_pipeline(;
         write_latex_kv_table(io, [
             ("Repeated Inferences on Last Instance", string(num_repeat_inference)),
             ("Avg Normalized Solution Distance across repeats" * (symmetric ? " (complement-invariant)" : ""), _fmt(avg_hamming_stability)),
-        ]; caption="Repeated-inference stability metrics for run $(run_id). Measured at batch size 1; BatchNorm normalizes over the whole batch (also in test mode), so heatmaps in the main evaluation (batch size $(batch_size)) also depend on the co-batched graphs", label="tab:stability-$(label_base)")
+        ]; caption="Repeated-inference stability metrics for run $(run_id). Measured at batch size 1", label="tab:stability-$(label_base)")
     end
 
     @info "LaTeX report saved to $filepath"
