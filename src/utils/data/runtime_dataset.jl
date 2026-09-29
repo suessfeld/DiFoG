@@ -235,7 +235,10 @@ function RuntimeDataset(num_instances::Int, generator::G, solver::P, seed::Integ
             push!(states, copy(rng))
             generator(rng)
         end
-        lines = collect(Iterators.take(Iterators.drop(eachline(path), 1), num_instances))
+        lines = open(path) do io
+            readline(io)                                   # header
+            collect(Iterators.take(eachline(io), num_instances))
+        end
         length(lines) == num_instances ||
             error("Seed dataset $path has fewer than $num_instances lines — check num_instances.")
         task = _spawn_shuffled_producer!(buffer, randperm(order_rng, num_instances), states, lines, generator, seed, path)

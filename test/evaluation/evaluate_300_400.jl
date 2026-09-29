@@ -267,8 +267,12 @@ function main()
                 eval_num += 1
                 run_id = build_run_id(problem_name, method_name, generator, gnn_config, scheduler_name, inference_steps)
 
-                if skip_existing_reports && isfile(joinpath(result_root, "reports", "report-$run_id.tex"))
-                    @info "Skipping $run_id (report already exists)."
+                # a report only counts if it is newer than its model (an older one belongs to a replaced model)
+                report_path = joinpath(result_root, "reports", "report-$run_id.tex")
+                model_path = joinpath(result_root, "models", "model-$train_id.jld2")
+                if skip_existing_reports && isfile(report_path) && isfile(model_path) &&
+                   mtime(report_path) > mtime(model_path)
+                    @info "Skipping $run_id (report newer than its model)."
                     continue
                 end
 

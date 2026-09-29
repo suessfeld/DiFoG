@@ -6,8 +6,8 @@ using Zygote: ignore_derivatives
 
 export AGNN
 
-# Normalization: LayerNorm (per node / edge over its features), as in the reference implementation of DIFUSCO and
-# EFLOCO (GNNEncoder with the default norm="layer"), although the DIFUSCO paper names BatchNorm. BatchNorm would
+# Normalization: LayerNorm (per node / edge over its features), as in the EFLOCO reference implementation (built on
+# the DIFUSCO code; GNNEncoder with the default norm="layer"), although the DIFUSCO paper names BatchNorm. BatchNorm would
 # normalize over the whole batch, whose graphs are at different noise levels during training (one t per graph)
 # but at one shared level during inference, and would make the results depend on the batch size and on the
 # co-batched graphs.
