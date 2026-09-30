@@ -98,6 +98,27 @@ end
     @test s.straightness > 0f0 && s.one_step_error > 0f0
 end
 
+@testitem "Test RectifiedFlow velocity targets reach x₁ and its complement from x_τ" setup=[TestRectifiedFlow] begin
+    using Random
+    Random.seed!(3)
+    g = toy_batch()
+    rf = RectifiedFlow(LinearScheduler(100, 5); prediction=:velocity)
+    cfg = GNNConfig(num_layers=1, in_dim=1, time_dim=8, hidden_dim=8, output_dim=1)
+    gnn = AGNN(cfg)
+    x_t, t, y, aux = DiFoG.corrupt_batch(rf, g.ndata.x, g)
+    prep = DiFoG._prepare_loss(gnn, rf, x_t, t, g, y, aux, true)
+    τ = reshape(Float32.(t[g.graph_indicator]) ./ 100f0, 1, :)
+    @test prep.τ ≈ τ
+    v, v_flip = DiFoG._velocity_targets(prep)
+    x_1 = 2f0 .* y .- 1f0
+    # following either target from x_τ for the remaining time 1 − τ lands on x₁ resp. its complement
+    @test x_t .+ (1f0 .- τ) .* v ≈ x_1 atol=1f-4
+    @test x_t .+ (1f0 .- τ) .* v_flip ≈ .-x_1 atol=1f-4
+    # an oracle predicting the flipped velocity has zero flip-invariant loss
+    @test DiFoG._node_mse(v_flip, v, v_flip, prep.gi, prep.ng, true) ≈ 0f0 atol=1f-10
+    @test DiFoG._node_mse(v_flip, v, v_flip, prep.gi, prep.ng, false) > 0f0
+end
+
 @testitem "Test RectifiedFlow losses, gradients and Reflow round trip with AGNN" setup=[TestRectifiedFlow] begin
     using Random
     Random.seed!(1)

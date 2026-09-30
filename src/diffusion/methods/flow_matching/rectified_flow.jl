@@ -147,7 +147,24 @@ Parameters:
 """
 _prepare_loss(gnn::GNN, flow::RectifiedFlow, x_t, timesteps, batch::GNNGraph, y, aux, symmetric::Bool) =
     (; batch, x_t, y, x_0 = aux.x_0, t_emb = _time_embedding(gnn, timesteps, batch),
+       τ = _node_row(Float32.(timesteps) ./ Float32(flow.scheduler.total_steps), batch.graph_indicator, size(y, 2)),
        gi = batch.graph_indicator, ng = batch.num_graphs, symmetric = symmetric && !aux.coupled)
+
+"""
+    _velocity_targets(prep)
+
+Returns the `:velocity` regression targets `(v, v_flip)`: v = x₁ − x₀ (equal to (x₁ − x_τ)/(1 − τ)) and the
+velocity (−x₁ − x_τ)/(1 − τ) that reaches the complement −x₁ from the same x_τ. The flipped target grows like
+(1 + τ)/(1 − τ), so the per-graph minimum picks it only for small τ, where x_τ carries almost no information
+about the orientation (τ ≤ 1 − 1/T, since training times are drawn from 0:T−1).
+
+Parameters:
+    - 'prep': The prepared loss components.
+"""
+function _velocity_targets(prep)
+    x_1 = _to_signal(prep.y)
+    return x_1 .- prep.x_0, (.-x_1 .- prep.x_t) ./ (1f0 .- prep.τ)
+end
 
 """
     _node_mse(pred::AbstractArray, y::AbstractArray, y_flip::AbstractArray, gi, num_graphs::Int, symmetric::Bool)
@@ -182,7 +199,8 @@ end
 Calculates the Rectified Flow objective.
     - `:x1`: BCE between the endpoint logit and the (possibly soft) target label. Its minimizer is
       E[x₁ | x_τ], which induces exactly the rectified velocity (E[x₁ | x_τ] − x_τ)/(1 − τ).
-    - `:velocity`: MSE between the predicted velocity and x₁ − x₀ (Liu et al., Eq. 1).
+    - `:velocity`: MSE between the predicted velocity and x₁ − x₀ (Liu et al., Eq. 1); the flipped target
+      is the velocity from x_τ to −x₁ (see `_velocity_targets`).
 
 Parameters:
     - 'gnn': The graph neural network model.
@@ -194,8 +212,8 @@ function _loss_terms(gnn::GNN, flow::RectifiedFlow, prep)
     if flow.prediction === :x1
         return (loss = _node_bce(out, prep.y, prep.gi, prep.ng, prep.symmetric),)
     end
-    x_1 = _to_signal(prep.y)
-    return (loss = _node_mse(out, x_1 .- prep.x_0, .-x_1 .- prep.x_0, prep.gi, prep.ng, prep.symmetric),)
+    v, v_flip = _velocity_targets(prep)
+    return (loss = _node_mse(out, v, v_flip, prep.gi, prep.ng, prep.symmetric),)
 end
 
 """
