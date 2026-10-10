@@ -170,7 +170,7 @@ end
 
 function main()
     DiFoG.GRB_THREADS[] = 1                    # S12: Gurobi labels/comparisons with 1 thread, independent of the machine
-    result_root = "/home/e12023149/thesis/results/results_50_100"
+    result_root = "/home/e12023149/DiFoG/results/results_50_100"
 
     # ---- Fixed across the entire grid ----
     generator = ERGraphGenerator(min_nodes=50, max_nodes=100, p=0.15)
@@ -195,8 +195,8 @@ function main()
 
     num_train = 10000
     num_test = 1000
-    epochs = 5
-    batch_size = 32
+    epochs = 20
+    batch_size = 64
     learning_rate = 0.001
     num_repeat_inference = 100
 
