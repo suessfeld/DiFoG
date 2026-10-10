@@ -3,6 +3,10 @@ uuid = "ad2ca0b9-54b2-4853-9914-e0387062c326"
 version = "0.1.0"
 authors = ["suessfeld <voill.elias@gmail.com>"]
 
+# test/evaluation is a separate project (experiment scripts, with Wandb) that shares this manifest
+[workspace]
+projects = ["test/evaluation"]
+
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
@@ -20,7 +24,6 @@ Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 LoggingExtras = "e6f89c97-d47a-5376-807f-9c37f3926c36"
 MHLib = "0f3a0e6e-e0e7-4894-bd64-856f0ae3b635"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
-Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Profile = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -32,6 +35,12 @@ TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 cuDNN = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
+
+[weakdeps]
+Wandb = "ad70616a-06c9-5745-b1f1-6a5f42545108"
+
+[extensions]
+DiFoGWandbExt = "Wandb"
 
 [compat]
 Adapt = "4"
@@ -49,7 +58,6 @@ Logging = "1.10"
 LoggingExtras = "1"
 MHLib = "0.3"
 NNlib = "0.9"
-Plots = "1.41.7"
 Profile = "1.10"
 ProgressMeter = "1"
 Random = "1.10"
@@ -59,5 +67,6 @@ StatsBase = "0.34"
 Test = "1.11.0"
 TestItemRunner = "1"
 TestItems = "1"
+Wandb = "0.5"
 Zygote = "0.7"
 cuDNN = "1"

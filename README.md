@@ -87,9 +87,14 @@ src/
 ├── model_utils.jl # save_model / load_model! (JLD2)
 ├── decoding_utils.jl # heatmap decoding/evaluation helpers
 ├── logging_utils.jl # logging utils
+├── tracking.jl # experiment tracking interface (AbstractTracker), loss/metric history writers
+├── validation.jl # validation_metrics: solution quality on labeled instances
 └── data/
 ├── data_utils.jl # normalize_graph
 └── runtime_dataset.jl # RuntimeDataset for training
+
+ext/ # package extension, loaded only together with its trigger package
+└── DiFoGWandbExt.jl # `using Wandb`: WandbTracker (Weights & Biases)
 
 test/
 ├── runtests.jl # test runner (TestItemRunner)
@@ -100,7 +105,8 @@ test/
 │   ├── test_diffusion.jl # DIFUSCO / BernoulliDiffusion tests
 │   ├── test_flow_matching.jl # EFLOCO / DiscreteFlowMatching tests
 │   ├── test_graph_generators.jl
-└── └── test_schedulers.jl
+│   ├── test_schedulers.jl
+└── └── test_tracking.jl # tracker interface, validation metrics, metric histories
 ```
 ## Usage
 The main way this module was used and tested is via pipelines. `test/test_utils.jl` provides a set of helpers to set up different configurations efficiently — most importantly `run_automated_pipeline`, which handles training, evaluation, and report generation end to end.
@@ -177,7 +183,7 @@ Some noteworthy details for pipeline usage:
   - The two methods' `p` step functions differ in signature (`p(..., t::Int, s::Int, g)` for Bernoulli vs. `p(..., τ::Real, τ_next::Real, g)` for flow matching) — this only matters if you're calling `p` directly rather than through `sample_heatmap`.
 - **Swapping the scheduler**: `LinearScheduler`, `CosineScheduler` take `(total_steps, inference_steps)`, or `(T, total_steps, inference_steps)` where `T` is `Int` or `Float32` to pick the eltype explicitly; `ATSSScheduler` additionally needs the `generator`, `solver`, and the interpolation function `κ`/`κ̇` to fit an adaptive step sequence up front.
 - **Swapping the problem**: pair `MISPSolver(time_limit)` with a MISP-oriented pipeline, or `MaxCutSolver(time_limit)` for Max-Cut — `decode_heatmap` is dispatched on the solver type, so the correct decoding strategy (greedy independent-set repair vs. naive thresholding) is picked up automatically.
-- **Validation**: by default, `run_automated_pipeline` builds a small held-out validation set (`num_val`, default `max(20, num_train÷20)`) and reports per-epoch validation loss alongside training loss. Pass `num_val = 0` to skip this.
+- **Validation**: by default, `run_automated_pipeline` builds a small held-out validation set (`num_val`, default `max(20, num_train÷20)`). After every epoch it reports the validation loss and the solution quality on this set (`validation_metrics`): the instances are sampled with the inference schedule of the model, decoded, and compared with their labels (mean gap, objective, heatmap error, decisiveness). Pass `num_val = 0` to skip this.
 
 ### Running a pipeline
 
@@ -185,10 +191,46 @@ Some noteworthy details for pipeline usage:
 julia --project=. path/to/your_run_script.jl
 ```
 
+The evaluation scripts in `test/evaluation/` use their own project (`test/evaluation/Project.toml`), which is part of the workspace of the package and therefore shares its manifest. Set it up once with
+
+```bash
+julia --project=test/evaluation -e 'using Pkg; Pkg.instantiate()'
+```
+
+### Experiment tracking
+
+The training loop reports its metrics to a tracker (`AbstractTracker`): the training loss of every batch, and after every epoch the validation loss and the solution-quality metrics. The default `NoTracker` discards them. The Weights & Biases tracker is a package extension, so DiFoG itself does not depend on a tracking or plotting package: `using Wandb` enables `DiFoG.WandbTracker(; project, name, config, kwargs...)`, which creates one W&B run. Wandb.jl installs the Python client on first use (CondaPkg, into `.CondaPkg/` next to the active project). Authenticate once with `WANDB_API_KEY` (or `wandb login`); `WANDB_MODE=offline` writes the runs to `wandb/` for a later `wandb sync`.
+
+The loss and metric histories are also written as plain text (`graphs/` of a result root), from which plots can be made with any tool.
+
+```julia
+using DiFoG, Wandb
+
+tracker = DiFoG.WandbTracker(; project="DiFoG", name="misp_diffusion", config=Dict("epochs" => "20"))
+history = DiFoG.train_diffusion_model!(model, optim, train_loader; epochs=20, val_loader, solver,
+                                        val_graphs, tracker)
+DiFoG.finish!(tracker)
+```
+
+`run_automated_pipeline` takes a function `make_tracker = (name, config) -> tracker` instead and calls it only when a model is actually trained. The evaluation scripts are controlled by environment variables:
+
+| Variable | Effect |
+|---|---|
+| `DIFOG_WANDB=true` | load Wandb.jl and track every training run in W&B (project `WANDB_PROJECT`, default `DiFoG`) |
+| `DIFOG_RESULT_ROOT=<dir>` | write to another result directory (its `seeds/` must contain the labeled datasets) |
+| `DIFOG_TRAIN_ONLY=true` | train the models only, without the test evaluation |
+
+```bash
+DIFOG_WANDB=true DIFOG_TRAIN_ONLY=true DIFOG_RESULT_ROOT=results/results_50_100_tracked \
+    julia test/evaluation/evaluate_50_100.jl
+```
+
 ### Outputs
 ```
 A completed run produces:
 models/model-<run_id>.jld2 # trained GNN weights (JLD2, CPU state)
+graphs/loss-<run_id>.txt # training loss per batch, validation loss per epoch
+graphs/metrics-<run_id>.csv # all metrics per epoch (losses, validation gap, objective, heatmap error)
 results/report-<run_id>.tex # latex report
 results/test_instances_<run_id>/test_instance_<n>result.txt # test instances (truth + pred.)
 test_instance<last>_<r>_result.txt # repeated inference on last inst.

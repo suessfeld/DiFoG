@@ -7,10 +7,10 @@ using Statistics
 using Logging
 using MHLib
 using Random
-using Plots
 
 
 include("./utils/logging_utils.jl")
+include("./utils/tracking.jl")
 include("./utils/gurobi_session.jl")
 
 include("./diffusion/diffusion.jl")
@@ -23,7 +23,6 @@ include("diffusion_model.jl")
 
 include("./utils/model_utils.jl")
 include("./utils/decoding_utils.jl")
-include("./utils/plotting.jl")
 
 include("./diffusion/methods/diffusion/bernoulli_diffusion.jl")
 include("./diffusion/methods/flow_matching/discrete_flow_matching.jl")
@@ -31,7 +30,8 @@ include("./diffusion/methods/flow_matching/rectified_flow.jl")
 
 include("./utils/data/data_utils.jl")
 include("./utils/data/runtime_dataset.jl")
-include("./utils/data/seeding.jl")  
+include("./utils/data/seeding.jl")
+include("./utils/validation.jl")
 
 include("./diffusion/scheduler/linear.jl")
 include("./diffusion/scheduler/cosine.jl")

@@ -1,11 +1,16 @@
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.activate(@__DIR__)   # project of the experiment scripts (DiFoG + Wandb), shares the manifest of the package
 
 using CUDA
 using cuDNN
 using Flux
 using Random
 using DiFoG
+
+# Experiment tracking with Weights & Biases: DIFOG_WANDB=true loads Wandb.jl, which enables `DiFoG.WandbTracker`
+# (package extension). Without it, the metrics of a training run are only written to graphs/ of the result root.
+const USE_WANDB = lowercase(get(ENV, "DIFOG_WANDB", "false")) == "true"
+USE_WANDB && @eval using Wandb
 
 include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
 
@@ -130,7 +135,8 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
                        reflow_from::Union{Nothing,String}=nothing, reflow_ode_steps::Int=100,
                        reflow_pairs_per_instance::Int=1,
                        comparison_solver::Union{Nothing,ProblemSolver}=nothing,
-                       comparison_solvers::AbstractVector=ProblemSolver[])
+                       comparison_solvers::AbstractVector=ProblemSolver[],
+                       make_tracker=nothing)
 
     if scheduler_name == "atss"
         seed_everything!("atss:" * run_id)
@@ -165,12 +171,20 @@ function execute_case(; run_id::String, train_run_id::String, method_name::Strin
         reflow_pairs_per_instance = reflow_pairs_per_instance,
         comparison_solver = comparison_solver,
         comparison_solvers = comparison_solvers,
+        make_tracker = make_tracker,
     )
 end
 
 function main()
     DiFoG.GRB_THREADS[] = 1                    # S12: Gurobi labels/comparisons with 1 thread, independent of the machine
-    result_root = "/home/e12023149/thesis/results/results_700_800"
+    # DIFOG_RESULT_ROOT: another result directory, e.g. for a tracked rerun next to the existing results
+    result_root = get(ENV, "DIFOG_RESULT_ROOT", "/home/e12023149/thesis/results/results_700_800")
+    # DIFOG_TRAIN_ONLY=true: train (and track) the models only, without the test evaluation
+    train_only = lowercase(get(ENV, "DIFOG_TRAIN_ONLY", "false")) == "true"
+    wandb_project = get(ENV, "WANDB_PROJECT", "DiFoG")
+    # inference schedule of the solution-quality metrics measured on the validation set after every epoch
+    val_scheduler = "cosine"
+    val_inference_steps = 5
 
     # ---- Fixed across the entire grid ----
     generator = ERGraphGenerator(min_nodes=700, max_nodes=800, p=0.15)
@@ -195,7 +209,7 @@ function main()
 
     num_train = 10000
     num_test = 1000
-    epochs = 5
+    epochs = 20
     batch_size = 1
     learning_rate = 0.001
     num_repeat_inference = 100
@@ -243,6 +257,10 @@ function main()
             teacher = reflow_teacher(method_name)
             reflow_from = isnothing(teacher) ? nothing : build_train_run_id(problem_name, teacher, generator, gnn_config)
 
+            # one W&B run per trained model, grouped by instance distribution
+            make_tracker = USE_WANDB ? ((name, config) -> DiFoG.WandbTracker(; project=wandb_project, name, config,
+                               group="er_$(generator.min_nodes)_$(generator.max_nodes)")) : nothing
+
             # ---- Train (or load, if this train_id's model already exists); no evaluation (R32) ----
             @info "=== Model $model_num/$n_models: training $train_id ==="
             try
@@ -250,14 +268,22 @@ function main()
                     run_id = train_id,
                     train_run_id = train_id,
                     method_name = method_name,
-                    scheduler_name = "linear",       # placeholder: training only reads total_steps
-                    inference_steps = 2,
+                    # training only reads total_steps of the schedule; the schedule itself is used for the
+                    # solution-quality metrics on the validation set
+                    scheduler_name = val_scheduler,
+                    inference_steps = val_inference_steps,
                     solver = solver,
                     evaluate = false,
                     reflow_from = reflow_from,
+                    make_tracker = make_tracker,
                 )
             catch e
                 @error "Training $train_id FAILED — skipping its evaluations and continuing with the next model." exception=(e, catch_backtrace())
+                continue
+            end
+
+            if train_only
+                @info "DIFOG_TRAIN_ONLY — skipping the evaluations of $train_id."
                 continue
             end
 
