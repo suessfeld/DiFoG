@@ -251,9 +251,17 @@ _format_parts(parts::NamedTuple) =
 _sync_device() = (CUDA.functional() && CUDA.synchronize(); nothing)
 
 """
-    train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5, val_loader::Union{Nothing,Flux.DataLoader}=nothing, symmetric_labels::Bool=false)
+    train_diffusion_model!(model::DiffusionModel, optim, data_loader; epochs::Int=5, val_loader=nothing,
+                           symmetric_labels::Bool=false, solver=nothing, val_graphs=nothing,
+                           val_batch_size::Int=32, tracker::AbstractTracker=NoTracker(), log_every::Int=1)
 
-Executes the main training loop for a diffusion model, tracking loss history over batches and epochs.
+Executes the main training loop for a diffusion model. After every epoch, the validation loss and, if `solver`
+and `val_graphs` are given, the solution quality on the validation instances (`validation_metrics`) are computed.
+All metrics are reported to `tracker` and returned.
+
+Returns a NamedTuple `(; loss_history, val_loss_history, batch_loss_history, val_loss_batches, epoch_history)`:
+the average training loss per epoch, the validation loss per epoch, the training loss per batch, the batch number
+of every validation, and one NamedTuple per epoch with all epoch metrics (`save_metric_history`).
 
 Parameters:
     - 'model': The diffusion model to train.
@@ -262,15 +270,27 @@ Parameters:
     - 'epochs': The total number of epochs to train for.
     - 'val_loader': An optional dataloader for held-out validation.
     - 'symmetric_labels': Boolean flag to apply flip-invariant loss for complement-symmetric labels.
+    - 'solver': The problem solver used to decode and score validation samples (`nothing` = loss only).
+    - 'val_graphs': The labeled validation instances for the solution-quality metrics. Passed separately from
+      `val_loader`, whose targets are not the labels when training on a Reflow coupling.
+    - 'val_batch_size': The number of validation instances sampled together.
+    - 'tracker': The experiment tracker the metrics are reported to (e.g. `WandbTracker`).
+    - 'log_every': The training loss is reported to the tracker every `log_every` batches.
 """
 function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
                                  epochs::Int=5,
                                  val_loader::Union{Nothing,Flux.DataLoader}=nothing,
-                                 symmetric_labels::Bool=false)
+                                 symmetric_labels::Bool=false,
+                                 solver=nothing,
+                                 val_graphs::Union{Nothing,AbstractVector{<:GNNGraph}}=nothing,
+                                 val_batch_size::Int=32,
+                                 tracker::AbstractTracker=NoTracker(),
+                                 log_every::Int=1)
     loss_history = Float32[]
     val_loss_history = Float32[]
     batch_loss_history = Float32[]
     val_loss_batches = Int[]
+    epoch_history = NamedTuple[]
     global_batch_num = 0
     @info "Starting training (symmetric_labels=$symmetric_labels)"
 
@@ -316,22 +336,39 @@ function train_diffusion_model!(model::DiffusionModel, optim, data_loader;
 
             epoch_loss += loss
             push!(batch_loss_history, loss)
+
+            if global_batch_num % log_every == 0
+                metrics = Dict{String,Float64}("train/$k" => Float64(v) for (k, v) in pairs(loss_parts))
+                metrics["epoch"] = epoch
+                log_metrics!(tracker, metrics; step=global_batch_num)
+            end
         end
 
         avg_loss = epoch_loss / max(1, num_batches)
         push!(loss_history, avg_loss)
 
+        epoch_metrics = (; epoch, batch = global_batch_num, train_loss = avg_loss)
         if !isnothing(val_loader)
-            val_loss = _validation_loss(model, val_loader; symmetric_labels=symmetric_labels)
-            push!(val_loss_history, val_loss)
+            val = _validate(model, val_loader; symmetric_labels, solver, val_graphs, val_batch_size)
+            push!(val_loss_history, val.loss)
             push!(val_loss_batches, global_batch_num)
-            @info "Epoch $epoch | Avg Train Loss: $avg_loss | Avg Val Loss: $val_loss"
+            epoch_metrics = merge(epoch_metrics, NamedTuple{Tuple(Symbol.("val_", keys(val)))}(values(val)))
+            quality = join(["$k: $(round(Float64(v), digits=4))" for (k, v) in pairs(val) if k != :loss], " | ")
+            @info "Epoch $epoch | Avg Train Loss: $avg_loss | Avg Val Loss: $(val.loss)" *
+                  (isempty(quality) ? "" : " | Validation " * quality)
         else
             @info "Epoch $epoch | Avg Loss: $avg_loss"
         end
+        push!(epoch_history, epoch_metrics)
+
+        metrics = Dict{String,Float64}("epoch" => epoch, "train/epoch_loss" => avg_loss)
+        for (k, v) in pairs(epoch_metrics)
+            startswith(string(k), "val_") && (metrics["val/" * string(k)[5:end]] = Float64(v))
+        end
+        log_metrics!(tracker, metrics; step=global_batch_num)
     end
 
-    return loss_history, val_loss_history, batch_loss_history, val_loss_batches
+    return (; loss_history, val_loss_history, batch_loss_history, val_loss_batches, epoch_history)
 end
 
 const VALIDATION_SEED = 0x5eed_7a1d
@@ -358,18 +395,30 @@ function _with_fixed_rng(f, seed)
 end
 
 """
-    _validation_loss(model::DiffusionModel, val_loader; symmetric_labels::Bool=false)
+    _validate(model::DiffusionModel, val_loader; symmetric_labels::Bool=false, solver=nothing, val_graphs=nothing,
+              val_batch_size::Int=32)
 
-Computes the average forward-only loss over a validation set using a fixed random seed for consistent evaluation.
+Computes the validation metrics of an epoch using a fixed random seed for consistent evaluation: the average
+forward-only loss over the validation set and, if `solver` and `val_graphs` are given, the solution-quality
+metrics of `validation_metrics`. Returns a NamedTuple with `loss` first.
+
+Everything runs inside one fixed-seed step and the loss is computed first, so the loss values and the random
+stream of the training after the validation do not depend on whether the solution quality is measured.
 
 Parameters:
     - 'model': The diffusion model to evaluate.
     - 'val_loader': The dataloader providing validation data.
     - 'symmetric_labels': Boolean flag to apply flip-invariant loss.
+    - 'solver': The problem solver used to decode and score validation samples (`nothing` = loss only).
+    - 'val_graphs': The labeled validation instances for the solution-quality metrics.
+    - 'val_batch_size': The number of validation instances sampled together.
 """
-function _validation_loss(model::DiffusionModel, val_loader; symmetric_labels::Bool=false)
+function _validate(model::DiffusionModel, val_loader; symmetric_labels::Bool=false, solver=nothing,
+                   val_graphs=nothing, val_batch_size::Int=32)
     return _with_fixed_rng(VALIDATION_SEED) do
-        _validation_loss_unseeded(model, val_loader, symmetric_labels)
+        loss = _validation_loss_unseeded(model, val_loader, symmetric_labels)
+        (isnothing(solver) || isnothing(val_graphs)) && return (; loss)
+        merge((; loss), validation_metrics(model, solver, val_graphs; batch_size=val_batch_size))
     end
 end
 

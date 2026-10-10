@@ -30,6 +30,8 @@ end
 end
 
 @testitem "Test RectifiedFlow corrupt_batch lies on the straight path" setup=[TestRectifiedFlow] begin
+    using Flux
+    using GraphNeuralNetworks
     rf = RectifiedFlow(LinearScheduler(100, 10))
     g = toy_batch()
     y = g.ndata.x
@@ -50,6 +52,7 @@ end
 end
 
 @testitem "Test RectifiedFlow Euler steps (both parameterizations)" setup=[TestRectifiedFlow] begin
+    using Flux
     g = toy_batch()
     x = Float32[0.3 -1.2 0.5 2.0 -0.1 0.0 1.0]
 
@@ -74,6 +77,7 @@ end
 end
 
 @testitem "Test RectifiedFlow sample_heatmap returns a heatmap in [0, 1]" setup=[TestRectifiedFlow] begin
+    using Flux
     g = toy_batch()
     rf = RectifiedFlow(LinearScheduler(100, 3))
     logits = Float32[3 -3 0 1 -1 2 -2]
@@ -120,6 +124,7 @@ end
 end
 
 @testitem "Test RectifiedFlow losses, gradients and Reflow round trip with AGNN" setup=[TestRectifiedFlow] begin
+    using Flux
     using Random
     Random.seed!(1)
     g = toy_batch()

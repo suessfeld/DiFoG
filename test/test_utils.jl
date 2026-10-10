@@ -131,7 +131,7 @@ end
     run_automated_pipeline(; run_id, train_run_id=run_id, model, generator, solver, num_train=1000,
                            num_test=100, num_val=max(20, div(num_train, 20)), epochs=5, batch_size=16,
                            learning_rate=1e-3, num_repeat_inference=5, evaluate=true,
-                           result_root, training_seed, test_seed, validation_seed)
+                           result_root, training_seed, test_seed, validation_seed, make_tracker=nothing)
 
 Runs training (or loads an existing model) and, unless `evaluate=false`, a full evaluation that is
 written as a LaTeX report.
@@ -164,6 +164,11 @@ Parameters:
       reference instance by instance and written to the report. `nothing` = no comparison.
     - 'comparison_solvers': Further comparison solvers on the same test instances (e.g. the other LNS variant),
       reported as "Comparison 2 …", "Comparison 3 …" after `comparison_solver`.
+    - 'make_tracker': Optional function `(name, config) -> AbstractTracker` (e.g. creating a
+      `DiFoG.WandbTracker`). It is called once when a model is actually trained, with `train_run_id` and the
+      training configuration; the loss and the validation metrics of every epoch are reported to the tracker.
+      `nothing` = no experiment tracking. The solution quality on the validation set is measured with the
+      inference schedule of `model.method` and is written to `graphs/metrics-<train_run_id>.csv` in any case.
 
 Returns the report path, or `nothing` when `evaluate=false`.
 """
@@ -190,7 +195,8 @@ function run_automated_pipeline(;
     reflow_pairs_per_instance::Int = 1,
     straightness_instances::Int = 20,
     comparison_solver::Union{Nothing,ProblemSolver} = nothing,
-    comparison_solvers::AbstractVector = ProblemSolver[]
+    comparison_solvers::AbstractVector = ProblemSolver[],
+    make_tracker = nothing
 )
     @info "=== Starting Pipeline Run: $run_id (trained model: $train_run_id, evaluate=$evaluate) ==="
     seeds_dir = joinpath(result_root, "seeds")
@@ -241,10 +247,12 @@ function run_automated_pipeline(;
         seed_everything!("train:" * train_run_id)
 
         val_loader = nothing
+        val_graphs = nothing   # labeled validation instances for the solution-quality metrics
         if num_val > 0
             @info "Building fixed validation set ($(num_val) instances, held constant across epochs)..."
             val_dataset = RuntimeDataset(num_val, generator, solver, validation_seed, seeds_dir)
             val_instances = [val_dataset[i] for i in 1:num_val]
+            val_graphs = GNNGraph[g for (g, _) in val_instances]
             val_loader = Flux.DataLoader(val_instances, batchsize=batch_size, shuffle=false, collate=true)
         else
             @info "num_val=0 — validation loss tracking disabled for this run."
@@ -280,9 +288,19 @@ function run_automated_pipeline(;
         )
 
         @info "Training model for $epochs epochs (symmetric labels: $symmetric)..."
-        loss_history, val_loss_history, batch_loss_history, val_loss_batches =
+        # the validation metrics are sampled with the inference schedule of the model passed to this call
+        val_schedule = "$(typeof(model.method.scheduler).name.name), $(model.method.scheduler.inference_steps) steps"
+        tracker = isnothing(make_tracker) ? DiFoG.NoTracker() :
+                  make_tracker(train_run_id, merge(train_meta, Dict("validation_schedule" => val_schedule,
+                                                                    "num_val" => string(num_val))))
+        history = try
             DiFoG.train_diffusion_model!(model, optim, train_loader; epochs=epochs, val_loader=val_loader,
-                                          symmetric_labels=symmetric)
+                                          symmetric_labels=symmetric, solver=solver, val_graphs=val_graphs,
+                                          val_batch_size=batch_size, tracker=tracker)
+        finally
+            DiFoG.finish!(tracker)
+        end
+        (; loss_history, val_loss_history, batch_loss_history, val_loss_batches, epoch_history) = history
         final_train_loss = isempty(loss_history) ? NaN : loss_history[end]
         final_val_loss = isempty(val_loss_history) ? NaN : val_loss_history[end]
 
@@ -290,12 +308,13 @@ function run_automated_pipeline(;
         DiFoG.save_model(model, model_path; meta=train_meta)
         @info "Model successfully saved to $model_path"
 
+        # raw histories for the plots of the thesis: loss per batch, and all metrics per epoch
         graphs_dir = joinpath(result_root, "graphs")
         mkpath(graphs_dir)
-        loss_plot_path = joinpath(graphs_dir, "loss-$train_run_id.png")
-        DiFoG.plot_loss_curve(batch_loss_history, val_loss_history, val_loss_batches, loss_plot_path, batch_size;
-                               title="Training Loss — $train_run_id")
-        @info "Loss curve saved to $loss_plot_path"
+        DiFoG.save_loss_history(batch_loss_history, val_loss_history, val_loss_batches,
+                                joinpath(graphs_dir, "loss-$train_run_id.txt"), batch_size)
+        DiFoG.save_metric_history(joinpath(graphs_dir, "metrics-$train_run_id.csv"), epoch_history)
+        @info "Loss and metric histories saved to $graphs_dir (validation schedule: $val_schedule)"
     end
 
     if !evaluate

@@ -49,3 +49,15 @@ results/results_700_800/reports
 
 /.vscode
 gurobi.lic
+
+# Python environment of Wandb.jl (CondaPkg)
+.CondaPkg/
+
+# Weights & Biases run files
+wandb/
+
+# further result roots (e.g. a tracked rerun); only the seeds of a result root are tracked
+/results/*/graphs
+/results/*/instances
+/results/*/models
+/results/*/reports
