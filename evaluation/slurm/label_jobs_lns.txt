@@ -1,14 +1,14 @@
-julia --project=. test/evaluation/create_dataset.jl maxcut 700 800 0.15 70080014 10000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 700 800 0.15 70080011 10000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040014 10000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 300 400 0.15 30040011 10000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl maxcut 700 800 0.15 70080015 1000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 700 800 0.15 70080012 1000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040015 1000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 300 400 0.15 30040012 1000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl maxcut 50 100 0.15 5010015 1000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 50 100 0.15 5010012 1000 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl maxcut 700 800 0.15 70080016 500 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 700 800 0.15 70080013 500 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040016 500 lns:r=1:it=100000 0 $RESULT_ROOT
-julia --project=. test/evaluation/create_dataset.jl misp 300 400 0.15 30040013 500 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 700 800 0.15 70080014 10000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 700 800 0.15 70080011 10000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 300 400 0.15 30040014 10000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 300 400 0.15 30040011 10000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 700 800 0.15 70080015 1000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 700 800 0.15 70080012 1000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 300 400 0.15 30040015 1000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 300 400 0.15 30040012 1000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 50 100 0.15 5010015 1000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 50 100 0.15 5010012 1000 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 700 800 0.15 70080016 500 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 700 800 0.15 70080013 500 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl maxcut 300 400 0.15 30040016 500 lns:r=1:it=100000 0 $RESULT_ROOT
+julia evaluation/create_dataset.jl misp 300 400 0.15 30040013 500 lns:r=1:it=100000 0 $RESULT_ROOT

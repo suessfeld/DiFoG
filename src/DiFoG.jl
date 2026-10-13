@@ -7,6 +7,7 @@ using Statistics
 using Logging
 using MHLib
 using Random
+import Wandb
 
 
 include("./utils/logging_utils.jl")

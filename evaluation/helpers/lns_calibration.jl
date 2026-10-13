@@ -1,4 +1,4 @@
-# test/helpers/lns_calibration.jl
+# evaluation/helpers/lns_calibration.jl
 #
 # Calibrates an iteration limit for the LNS labels. For the first instances of a seeded dataset and both starts
 # (random = LNS-rand, greedy = LNS-greedy) it reports
@@ -10,13 +10,13 @@
 # Run it on an otherwise idle machine: with other jobs on the same cores, fewer iterations fit into the time limit.
 #
 # Usage:
-#   julia --project=. test/helpers/lns_calibration.jl <problem> <min_n> <max_n> <p> <seed> <n_inst> [r] [seconds]
+#   julia evaluation/helpers/lns_calibration.jl <problem> <min_n> <max_n> <p> <seed> <n_inst> [r] [seconds]
 #   problem ∈ {maxcut, misp}; r = random repairs per LNS iteration (default 1); seconds = time limit (default 30).
 # Example (MaxCut ER-700-800, training seed):
-#   julia --project=. test/helpers/lns_calibration.jl maxcut 700 800 0.15 70080014 5
+#   julia evaluation/helpers/lns_calibration.jl maxcut 700 800 0.15 70080014 5
 
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Printf
 using Random

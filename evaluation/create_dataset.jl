@@ -1,11 +1,11 @@
-# test/evaluation/create_dataset.jl
+# evaluation/create_dataset.jl
 #
 # Creates (or completes) one seeded dataset: the graphs are drawn from `Xoshiro(seed)` by an ER generator and
 # labelled by the chosen solver; only the labels are stored (see `create_dataset`). An interrupted run can
 # simply be restarted, it continues where it stopped.
 #
 # Usage:
-#   julia --project=. test/evaluation/create_dataset.jl <problem> <min_n> <max_n> <p> <seed> <num_instances> \
+#   julia evaluation/create_dataset.jl <problem> <min_n> <max_n> <p> <seed> <num_instances> \
 #         <solver> <time_limit_s> [result_root]
 #   problem ∈ {misp, maxcut}
 #   solver  ∈ {lns, lnsgreedy, gurobi}: lns = LNS-rand of Bresich et al. (d = 5, r = 2000 MIS / 1000 MaxCut), the
@@ -19,15 +19,15 @@
 # Files: <result_root>/seeds/<seed>.csv (gurobi), <seed>_lns.csv (lns) and <seed>_lnsgreedy.csv (lnsgreedy).
 # All describe the SAME graphs, so
 # the two labellings of one seed can be created at the same time in two processes, e.g.
-#   julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040005 100 lns 3    &
-#   julia --project=. test/evaluation/create_dataset.jl maxcut 300 400 0.15 30040005 100 gurobi 60 &
+#   julia evaluation/create_dataset.jl maxcut 300 400 0.15 30040005 100 lns 3    &
+#   julia evaluation/create_dataset.jl maxcut 300 400 0.15 30040005 100 gurobi 60 &
 # Two processes must never work on the same file (same seed AND same solver).
 #
 # Note: an existing file is reused as is — the time limit is not part of the file name. Delete the file to
 # regenerate it with a different time limit.
 
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.activate(@__DIR__)
 
 using DiFoG
 

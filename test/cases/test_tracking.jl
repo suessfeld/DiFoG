@@ -106,10 +106,25 @@ end
     end
 end
 
-@testitem "Test tracker backend is optional" begin
-    # the W&B backend is a package extension: without Wandb loaded, only the function stub exists
+@testitem "Test NoTracker discards the metrics" begin
     @test NoTracker() isa AbstractTracker
     @test log_metrics!(NoTracker(), Dict("train/loss" => 1.0); step=1) === nothing
     @test finish!(NoTracker()) === nothing
-    @test isnothing(Base.get_extension(DiFoG, :DiFoGWandbExt)) == isempty(methods(WandbTracker))
+end
+
+@testitem "Test WandbTracker reports to a Weights & Biases run" begin
+    # Wandb.jl has to load next to DiFoG; the run is offline, so neither an account nor a connection is needed
+    using Wandb
+
+    dir = mktempdir()
+    tracker = WandbTracker(; project="DiFoG-test", name="test_tracking", config=Dict("epochs" => 1, :lr => 0.001),
+                           mode="offline", dir=dir)
+    @test tracker isa AbstractTracker
+    @test log_metrics!(tracker, Dict("train/loss" => 0.5f0, "val/gap" => 1.25); step=1) === nothing
+    @test log_metrics!(tracker, Dict("train/loss" => 0.25f0); step=2) === nothing
+    @test finish!(tracker) === nothing
+
+    # the offline run is written below <dir>/wandb
+    run_root = joinpath(dir, "wandb")
+    @test isdir(run_root) && any(startswith("offline-run"), readdir(run_root))
 end

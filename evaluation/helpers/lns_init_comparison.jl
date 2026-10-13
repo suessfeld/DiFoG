@@ -1,14 +1,14 @@
-# test/helpers/lns_init_comparison.jl
+# evaluation/helpers/lns_init_comparison.jl
 #
 # Compares the degree greedy, LNS-rand (random start) and the LNS started from the greedy solution on the first
 # instances of a seeded dataset, to check whether the LNS reference is better than the greedy baseline.
 # The k-th instance is the k-th graph drawn from `Xoshiro(seed)` by the generator, as in `create_dataset`.
 #
 # Usage:
-#   julia --project=. test/helpers/lns_init_comparison.jl <problem> <min_n> <max_n> <p> <seed> <n_inst> [ttime]
+#   julia evaluation/helpers/lns_init_comparison.jl <problem> <min_n> <max_n> <p> <seed> <n_inst> [ttime]
 #   problem ∈ {maxcut, misp}; ttime = LNS time limit in seconds (default 3).
 # Example (MaxCut ER-700-800, training seed):
-#   julia --project=. test/helpers/lns_init_comparison.jl maxcut 700 800 0.15 70080004 5
+#   julia evaluation/helpers/lns_init_comparison.jl maxcut 700 800 0.15 70080004 5
 #
 # Results (Slurm cluster, ER-700-800, p = 0.15, first 5 instances of the training datasets; objective values).
 # They motivated `init = :greedy` for the ER-700-800 labels: within 3 s, LNS-rand stays below the degree greedy on
@@ -42,7 +42,7 @@
 #   mean relative to the greedy: LNS-rand 99.83%, LNS-greedy 101.20%
 
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Printf
 using Random

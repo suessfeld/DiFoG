@@ -1,4 +1,4 @@
-# test/helpers/gurobi_convergence.jl
+# evaluation/helpers/gurobi_convergence.jl
 #
 # Gurobi convergence study: solves dataset instances with a long time limit and records the incumbent
 # and the dual bound over time, to determine after how many seconds Gurobi stops improving (and thus a
@@ -8,7 +8,7 @@
 # `Xoshiro(seed)` by the same generator, as in `create_dataset`. The ILP is the same one used for the labels.
 #
 # Usage:
-#   julia --project=. test/helpers/gurobi_convergence.jl <problem> <min_n> <max_n> <p> <seed> \
+#   julia evaluation/helpers/gurobi_convergence.jl <problem> <min_n> <max_n> <p> <seed> \
 #         <first_idx> <last_idx> <time_limit_s> <outdir>
 #   problem ∈ {maxcut, misp}; Gurobi threads = $SLURM_CPUS_PER_TASK ÷ 2 (one per physical core), at least 1,
 #   overridable with $GRB_THREADS.
@@ -17,10 +17,10 @@
 #   kind,time,incumbent,bound     kind ∈ {sol, bound, final}
 # "sol" rows are improving solutions, "bound" rows are dual-bound improvements (integer steps), and the
 # single "final" row holds the solve time, final objective and final bound. Analyze the directory with
-# test/evaluation/analyze_gurobi_convergence.jl.
+# evaluation/helpers/analyze_gurobi_convergence.jl.
 
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Random
 using Graphs

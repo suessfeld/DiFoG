@@ -1,0 +1,5 @@
+# Python environment of Wandb.jl (created by CondaPkg in .CondaPkg/ next to the active project on the first load).
+# The Python version is bounded so that binary wheels exist for all dependencies of the wandb client.
+
+[deps]
+python = ">=3.11,<3.14"

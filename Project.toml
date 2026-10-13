@@ -3,9 +3,9 @@ uuid = "ad2ca0b9-54b2-4853-9914-e0387062c326"
 version = "0.1.0"
 authors = ["suessfeld <voill.elias@gmail.com>"]
 
-# test/evaluation is a separate project (experiment scripts, with Wandb) that shares this manifest
+# test (TestItem tests) and evaluation (experiment scripts) are separate projects that share this manifest
 [workspace]
-projects = ["test/evaluation"]
+projects = ["test", "evaluation"]
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
@@ -30,17 +30,9 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 ShowSet = "fa774e86-460a-546b-b195-92e8193e3324"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
-TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
+Wandb = "ad70616a-06c9-5745-b1f1-6a5f42545108"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 cuDNN = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
-
-[weakdeps]
-Wandb = "ad70616a-06c9-5745-b1f1-6a5f42545108"
-
-[extensions]
-DiFoGWandbExt = "Wandb"
 
 [compat]
 Adapt = "4"
@@ -64,9 +56,6 @@ Random = "1.10"
 ShowSet = "0.3"
 Statistics = "1.10"
 StatsBase = "0.34"
-Test = "1.11.0"
-TestItemRunner = "1"
-TestItems = "1"
 Wandb = "0.5"
 Zygote = "0.7"
 cuDNN = "1"

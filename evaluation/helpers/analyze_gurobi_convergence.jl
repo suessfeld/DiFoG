@@ -1,4 +1,4 @@
-# test/helpers/analyze_gurobi_convergence.jl
+# evaluation/helpers/analyze_gurobi_convergence.jl
 #
 # Summarizes the trajectories written by gurobi_convergence.jl: for each checkpoint time T it reports how
 # far the incumbent at T is from the incumbent at the end of the run, and how many instances have already
@@ -6,7 +6,7 @@
 # the dual bound. Only needs the Julia standard library.
 #
 # Usage:
-#   julia test/helpers/analyze_gurobi_convergence.jl <dir> [checkpoints...]
+#   julia evaluation/helpers/analyze_gurobi_convergence.jl <dir> [checkpoints...]
 #   default checkpoints: 1 3 5 10 30 60 120 300 600
 #
 # Results (Slurm cluster, 26.09.2026; gurobi_convergence.jl with a 300 s limit and 1 thread, p = 0.15, first 5

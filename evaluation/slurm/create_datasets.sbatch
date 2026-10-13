@@ -8,9 +8,9 @@
 # Submit from the repository root, with the cluster-specific Julia depot exported (it is passed on to the tasks):
 #   export JULIA_DEPOT_PATH=$HOME/.julia_cluster:
 #   mkdir -p logs/labels
-#   JOBS=test/evaluation/slurm/label_jobs_lns.txt
-#   sbatch --array=1-$(grep -c . $JOBS) --export=ALL,JOBS=$JOBS test/evaluation/slurm/create_datasets.sbatch
-# Precompile once before (julia --project=. -e 'using DiFoG'), so the tasks do not all compile at the same time.
+#   JOBS=evaluation/slurm/label_jobs_lns.txt
+#   sbatch --array=1-$(grep -c . $JOBS) --export=ALL,JOBS=$JOBS evaluation/slurm/create_datasets.sbatch
+# Precompile once before (julia --project=evaluation -e 'using DiFoG'), so the tasks do not all compile at the same time.
 # Options: RESULT_ROOT (labels go to $RESULT_ROOT/seeds; default $HOME/difog/results), a limit of simultaneous
 # tasks (--array=1-18%10), another partition (--partition=...; the longest file needs about 1.5 days).
 # An interrupted task (e.g. at the time limit) can simply be submitted again: create_dataset.jl continues each file

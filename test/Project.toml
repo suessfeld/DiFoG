@@ -1,0 +1,19 @@
+[deps]
+DiFoG = "ad2ca0b9-54b2-4853-9914-e0387062c326"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+GraphNeuralNetworks = "cffab07f-9bc2-4db1-8861-388f63bf7694"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
+Wandb = "ad70616a-06c9-5745-b1f1-6a5f42545108"
+
+[sources]
+DiFoG = {path = ".."}
+
+[compat]
+TestItemRunner = "1"
+TestItems = "1"

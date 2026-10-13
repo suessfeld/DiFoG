@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate(@__DIR__)   # project of the experiment scripts (DiFoG + Wandb), shares the manifest of the package
+Pkg.activate(@__DIR__)   # project of the experiment scripts, shares the manifest of the package
 
 using CUDA
 using cuDNN
@@ -7,12 +7,11 @@ using Flux
 using Random
 using DiFoG
 
-# Experiment tracking with Weights & Biases: DIFOG_WANDB=true loads Wandb.jl, which enables `DiFoG.WandbTracker`
-# (package extension). Without it, the metrics of a training run are only written to graphs/ of the result root.
+# Experiment tracking with Weights & Biases: DIFOG_WANDB=true reports every training run with a `DiFoG.WandbTracker`.
+# Without it, the metrics of a training run are only written to graphs/ of the result root.
 const USE_WANDB = lowercase(get(ENV, "DIFOG_WANDB", "false")) == "true"
-USE_WANDB && @eval using Wandb
 
-include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
+include(joinpath(@__DIR__, "pipeline.jl"))
 
 """
     build_run_id(problem_name, method_name, generator, gnn_config, scheduler_name, inference_steps)
@@ -192,7 +191,7 @@ function main()
     # ER-50-100 (solves the instances exactly or nearly so), the LNS on the larger distributions. The other solver
     # labels the test instances as comparison. The LNS is LNS-rand of Bresich et al. with a single random repair per
     # iteration (r = 1) and an iteration limit instead of a time limit, so its labels do not depend on the machine;
-    # 10^5 iterations are converged on all distributions (test/helpers/lns_calibration.jl).
+    # 10^5 iterations are converged on all distributions (evaluation/helpers/lns_calibration.jl).
     reference = :lns                        # :gurobi or :lns
     solver_time_limit = 10.0                   # Gurobi time limit (1 thread, conan)
     lns_iterations = 100_000                   # LNS iteration limit

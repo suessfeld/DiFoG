@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using CUDA
 using cuDNN
@@ -7,7 +7,7 @@ using Flux
 using Random
 using DiFoG
 
-include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
+include(joinpath(@__DIR__, "..", "pipeline.jl"))
 
 # H1 test: does the Euler step rule of discrete flow matching hurt, because it commits fewer nodes per step
 # than the mixture path the model was trained on (κ(τ) = τ² has κ̇(0) = 0, so the first Euler step commits

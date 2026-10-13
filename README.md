@@ -87,18 +87,15 @@ src/
 ├── model_utils.jl # save_model / load_model! (JLD2)
 ├── decoding_utils.jl # heatmap decoding/evaluation helpers
 ├── logging_utils.jl # logging utils
-├── tracking.jl # experiment tracking interface (AbstractTracker), loss/metric history writers
+├── tracking.jl # experiment tracking (AbstractTracker, NoTracker, WandbTracker), loss/metric history writers
 ├── validation.jl # validation_metrics: solution quality on labeled instances
 └── data/
 ├── data_utils.jl # normalize_graph
 └── runtime_dataset.jl # RuntimeDataset for training
 
-ext/ # package extension, loaded only together with its trigger package
-└── DiFoGWandbExt.jl # `using Wandb`: WandbTracker (Weights & Biases)
-
-test/
+test/ # TestItem tests only, own project (test/Project.toml)
+├── Project.toml
 ├── runtests.jl # test runner (TestItemRunner)
-├── test_utils.jl # pipeline helper (run_automated_pipeline)
 └── cases/
 │   ├── test_data_utils.jl
 │   ├── test_decoding_utils.jl
@@ -106,16 +103,26 @@ test/
 │   ├── test_flow_matching.jl # EFLOCO / DiscreteFlowMatching tests
 │   ├── test_graph_generators.jl
 │   ├── test_schedulers.jl
-└── └── test_tracking.jl # tracker interface, validation metrics, metric histories
+└── └── test_tracking.jl # tracker interface, WandbTracker (offline run), validation metrics, metric histories
+
+evaluation/ # use of the package: experiments of the thesis, own project (evaluation/Project.toml)
+├── Project.toml
+├── pipeline.jl # pipeline helper (run_automated_pipeline)
+├── create_dataset.jl # labels a seeded dataset
+├── evaluate_50_100.jl # experiment grid for one instance size (also 300_400, 700_800)
+├── helpers/ # Gurobi convergence study, LNS calibration, step-rule comparison
+└── slurm/ # batch scripts for the cluster
+
+CondaPkg.toml # Python version for the client of Wandb.jl
 ```
 ## Usage
-The main way this module was used and tested is via pipelines. `test/test_utils.jl` provides a set of helpers to set up different configurations efficiently — most importantly `run_automated_pipeline`, which handles training, evaluation, and report generation end to end.
+The main way this module was used and tested is via pipelines. `evaluation/pipeline.jl` provides a set of helpers to set up different configurations efficiently — most importantly `run_automated_pipeline`, which handles training, evaluation, and report generation end to end.
 
 ### Example Pipeline Usage
 
 ```julia
 using Pkg
-Pkg.activate(".")
+Pkg.activate("evaluation")
 
 using CUDA
 using cuDNN
@@ -123,7 +130,7 @@ using Flux
 using DiFoG
 
 # Training and pipeline helpers are outside of the package!
-include(joinpath(pkgdir(DiFoG), "test", "test_utils.jl"))
+include(joinpath(pkgdir(DiFoG), "evaluation", "pipeline.jl"))
 
 function main()
     # `run_id` is derived from the script's own filename.
@@ -188,23 +195,23 @@ Some noteworthy details for pipeline usage:
 ### Running a pipeline
 
 ```bash
-julia --project=. path/to/your_run_script.jl
+julia --project=evaluation path/to/your_run_script.jl
 ```
 
-The evaluation scripts in `test/evaluation/` use their own project (`test/evaluation/Project.toml`), which is part of the workspace of the package and therefore shares its manifest. Set it up once with
+Everything that uses the package (experiment scripts, pipeline helper) lives in `evaluation/`, with its own project (`evaluation/Project.toml`). Like `test/`, it is part of the workspace of the package and therefore shares its manifest. Set it up once with
 
 ```bash
-julia --project=test/evaluation -e 'using Pkg; Pkg.instantiate()'
+julia --project=evaluation -e 'using Pkg; Pkg.instantiate()'
 ```
 
 ### Experiment tracking
 
-The training loop reports its metrics to a tracker (`AbstractTracker`): the training loss of every batch, and after every epoch the validation loss and the solution-quality metrics. The default `NoTracker` discards them. The Weights & Biases tracker is a package extension, so DiFoG itself does not depend on a tracking or plotting package: `using Wandb` enables `DiFoG.WandbTracker(; project, name, config, kwargs...)`, which creates one W&B run. Wandb.jl installs the Python client on first use (CondaPkg, into `.CondaPkg/` next to the active project). Authenticate once with `WANDB_API_KEY` (or `wandb login`); `WANDB_MODE=offline` writes the runs to `wandb/` for a later `wandb sync`.
+The training loop reports its metrics to a tracker (`AbstractTracker`): the training loss of every batch, and after every epoch the validation loss and the solution-quality metrics. The default `NoTracker` discards them. `WandbTracker(; project, name, config, kwargs...)` reports them to Weights & Biases and creates one W&B run. Wandb.jl is a dependency of DiFoG and installs the Python client when it is first loaded (CondaPkg, into `.CondaPkg/` next to the active project; the Python version is set in `CondaPkg.toml`). Authenticate once with `WANDB_API_KEY` (or `wandb login`); `WANDB_MODE=offline` writes the runs to `wandb/` for a later `wandb sync`.
 
 The loss and metric histories are also written as plain text (`graphs/` of a result root), from which plots can be made with any tool.
 
 ```julia
-using DiFoG, Wandb
+using DiFoG
 
 tracker = DiFoG.WandbTracker(; project="DiFoG", name="misp_diffusion", config=Dict("epochs" => "20"))
 history = DiFoG.train_diffusion_model!(model, optim, train_loader; epochs=20, val_loader, solver,
@@ -216,13 +223,13 @@ DiFoG.finish!(tracker)
 
 | Variable | Effect |
 |---|---|
-| `DIFOG_WANDB=true` | load Wandb.jl and track every training run in W&B (project `WANDB_PROJECT`, default `DiFoG`) |
+| `DIFOG_WANDB=true` | track every training run in W&B (project `WANDB_PROJECT`, default `DiFoG`) |
 | `DIFOG_RESULT_ROOT=<dir>` | write to another result directory (its `seeds/` must contain the labeled datasets) |
 | `DIFOG_TRAIN_ONLY=true` | train the models only, without the test evaluation |
 
 ```bash
 DIFOG_WANDB=true DIFOG_TRAIN_ONLY=true DIFOG_RESULT_ROOT=results/results_50_100_tracked \
-    julia test/evaluation/evaluate_50_100.jl
+    julia evaluation/evaluate_50_100.jl
 ```
 
 ### Outputs
@@ -272,10 +279,11 @@ register the file in `src/DiFoG.jl`:
 ## Testing
 
 Tests are written with `TestItems.jl`/`TestItemRunner.jl` under
-`test/cases/`.
+`test/cases/`. The directory contains nothing else and has its own project
+(`test/Project.toml`), which is part of the workspace of the package.
 
 ```bash
-julia --project=. test/runtests.jl
+julia --project=test test/runtests.jl
 ```
 
 This runs all test items except those tagged `:job` (used for long-running

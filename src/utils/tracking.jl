@@ -1,9 +1,8 @@
 # src/utils/tracking.jl
 #
-# Experiment tracking. The training loop reports its metrics to an `AbstractTracker`; the package itself only
-# ships the no-op `NoTracker` and plain-text writers for the histories. The Weights & Biases backend is a package
-# extension, so its dependencies are only loaded when it is used: `using Wandb` enables `WandbTracker`
-# (ext/DiFoGWandbExt.jl).
+# Experiment tracking. The training loop reports its metrics to an `AbstractTracker`: the no-op `NoTracker`
+# or the `WandbTracker`, which reports to Weights & Biases (Wandb.jl). Plain-text writers for the histories are
+# provided in addition.
 
 export AbstractTracker, NoTracker, WandbTracker, log_metrics!, finish!,
        save_loss_history, save_metric_history
@@ -48,16 +47,37 @@ finish!(::AbstractTracker) = nothing
 """
     WandbTracker(; project, name=nothing, config=Dict(), kwargs...)
 
-Creates a tracker that reports to Weights & Biases (one W&B run per tracker). Implemented in the package
-extension `DiFoGWandbExt`, which is loaded by `using Wandb`. Further keyword arguments (e.g. `entity`, `group`,
-`tags`, `mode="offline"`) are passed to `wandb.init`.
+Tracker that reports to Weights & Biases (one W&B run per tracker). Further keyword arguments (e.g. `entity`,
+`group`, `tags`, `mode="offline"`, `dir`) are passed to `wandb.init`.
 
 Parameters:
     - 'project': The W&B project the run is added to.
     - 'name': The display name of the run.
     - 'config': The configuration of the run (hyperparameters), shown and searchable in W&B.
 """
-function WandbTracker end
+struct WandbTracker <: AbstractTracker
+    logger::Wandb.WandbLogger
+end
+
+function WandbTracker(; project::AbstractString, name::Union{Nothing,AbstractString}=nothing,
+                      config::AbstractDict=Dict{String,Any}(), kwargs...)
+    config = Dict{String,Any}(string(k) => v for (k, v) in config)
+    # on Windows, Wandb.jl adds a `start_method` setting that current wandb clients reject
+    if Sys.iswindows() && !haskey(kwargs, :settings)
+        kwargs = (; kwargs..., settings = Wandb.wandb.Settings())
+    end
+    return WandbTracker(Wandb.WandbLogger(; project, name, config, kwargs...))
+end
+
+function log_metrics!(tracker::WandbTracker, metrics::AbstractDict; step::Integer)
+    Wandb.log(tracker.logger, Dict{String,Any}(string(k) => Float64(v) for (k, v) in metrics); step=Int(step))
+    return nothing
+end
+
+function finish!(tracker::WandbTracker)
+    close(tracker.logger)
+    return nothing
+end
 
 """
     save_loss_history(batch_loss_history::Vector{Float32}, val_loss_history::Vector{Float32},

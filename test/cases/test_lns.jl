@@ -30,7 +30,7 @@ end
     using GraphNeuralNetworks
 
     g = cycle_graph(6)                                   # even cycle: bipartite, maximum cut = 6
-    x, gap = LNSSolver(MaxCutSolver(); ttime=0.2)(g)
+    x, gap = LNSSolver(MaxCutSolver(); ttime=-1, titer=200)(g)   # iteration limit: independent of compile time and machine speed
     @test isnan(gap)                                      # an LNS provides no bound
     @test size(x) == (1, 6) && all(v -> v == 0f0 || v == 1f0, x)
     @test DiFoG.evaluate(MaxCutSolver(), GNNGraph(g), vec(x) .> 0.5f0) == 6.0
@@ -41,7 +41,7 @@ end
     using Graphs
 
     g = path_graph(5)                                     # maximum independent set {1, 3, 5}
-    x, gap = LNSSolver(MISPSolver(); ttime=0.2)(g)
+    x, gap = LNSSolver(MISPSolver(); ttime=-1, titer=200)(g)
     @test isnan(gap)
     @test vec(x) == Float32[1, 0, 1, 0, 1]
     @test all(e -> !(x[1, src(e)] == 1f0 && x[1, dst(e)] == 1f0), edges(g))   # independent

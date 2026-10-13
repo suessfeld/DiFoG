@@ -4,7 +4,7 @@
 #
 # Submit from the repository root:
 #   mkdir -p logs
-#   sbatch test/evaluation/slurm/setup.sbatch
+#   sbatch evaluation/slurm/setup.sbatch
 # Result: logs/setup-<jobid>.out (look for the two "Gurobi OK:" lines at the end).
 
 #SBATCH --partition=cpu-fast
@@ -22,10 +22,10 @@ unset LD_LIBRARY_PATH
 export JULIA_NUM_PRECOMPILE_TASKS="$SLURM_CPUS_PER_TASK"
 
 echo "== Installing and precompiling packages ($(date)) =="
-julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+julia --project=evaluation -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
 check_gurobi() {
-    julia --project=. -e 'using DiFoG; println("Gurobi OK: ", isassigned(DiFoG.GRB_ENV))'
+    julia --project=evaluation -e 'using DiFoG; println("Gurobi OK: ", isassigned(DiFoG.GRB_ENV))'
 }
 
 echo "== Gurobi check WITHOUT the cluster module =="

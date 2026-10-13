@@ -6,7 +6,7 @@
 # Start it interactively from the repository root, e.g.
 #   mkdir -p logs
 #   srun --partition=cpu-fast --cpus-per-task=4 --mem=16G --time=04:00:00 --pty \
-#        bash test/evaluation/slurm/gurobi_convergence_interactive.sh 2>&1 | tee logs/grb-conv-interactive.log
+#        bash evaluation/slurm/gurobi_convergence_interactive.sh 2>&1 | tee logs/grb-conv-interactive.log
 #
 # Settings (environment variables, defaults in brackets):
 #   TLIMIT    Gurobi time limit per instance in seconds [300]; must exceed the time limit you want to judge
@@ -51,7 +51,7 @@ seed_for() {  # <problem> <min_n>
 }
 
 # repository root = three levels above this script, independent of where srun/bash was started
-cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 for size in $SIZES; do
     NMIN=${size%%:*}
     NMAX=${size##*:}
@@ -61,9 +61,9 @@ for size in $SIZES; do
         echo "=================================================================================="
         echo "== $PROBLEM on ER-$NMIN-$NMAX (p=$P), seed $SEED, instances 1..$N_INST, ${TLIMIT}s each  ($(date))"
         echo "=================================================================================="
-        "$JULIA" --project=. test/evaluation/gurobi_convergence.jl \
+        "$JULIA" evaluation/helpers/gurobi_convergence.jl \
             "$PROBLEM" "$NMIN" "$NMAX" "$P" "$SEED" 1 "$N_INST" "$TLIMIT" "$OUTDIR"
-        "$JULIA" test/evaluation/analyze_gurobi_convergence.jl "$OUTDIR"
+        "$JULIA" evaluation/helpers/analyze_gurobi_convergence.jl "$OUTDIR"
     done
 done
 echo "== Done ($(date))"
